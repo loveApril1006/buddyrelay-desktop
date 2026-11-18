@@ -1,6 +1,8 @@
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 mod commands;
 #[cfg(desktop)]
+mod magpie;
+#[cfg(desktop)]
 mod tray;
 mod webview_guard;
 
@@ -82,8 +84,20 @@ fn spawn_background_loops() {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    #[cfg(desktop)]
+    if std::env::args_os()
+        .nth(1)
+        .is_some_and(|arg| arg == magpie::GATEWAYS_ARG)
+    {
+        magpie::print_gateways();
+        return;
+    }
     let context = tauri::generate_context!();
     let identifier = context.config().identifier.clone();
+    #[cfg(desktop)]
+    let open_workbuddy = std::env::args_os().any(|arg| arg == magpie::WORKBUDDY_ARG);
+    #[cfg(desktop)]
+    let silent = tray::is_silent_startup(std::env::args());
 
     // 已有实例在跑 ⇒ 不启动第二个 UI。
     // 两个实例共用同一个 WebView2 profile（`%LOCALAPPDATA%\<identifier>\EBWebView`），
@@ -91,6 +105,10 @@ pub fn run() {
     // 抢不到反代端口（os error 10048）。用户看到的就是"点开是白屏"。
     // 所以：请已有实例把窗口显示出来，然后自己退出。
     if webview_guard::another_instance_running() {
+        #[cfg(desktop)]
+        if silent || (!open_workbuddy && magpie::launch(false)) {
+            return;
+        }
         webview_guard::request_show(&identifier);
         eprintln!("[instance] 已有实例在运行，已请求它显示主窗口，本次退出");
         return;
@@ -115,7 +133,7 @@ pub fn run() {
     }
 
     let app = builder
-        .setup(|app| {
+        .setup(move |app| {
             // 更新防护自愈：只要用户之前开过防护（更新源还指在黑洞上），
             // 每次启动就把该补的层补一遍并隔离新下载的包。
             // 需要它是因为**重装/升级会覆盖 `resources/`**、把 product.json 那层抹掉
@@ -132,16 +150,15 @@ pub fn run() {
             #[cfg(desktop)]
             {
                 tray::setup(app)?;
-                // 主窗口由配置创建为不可见；在事件循环呈现前决定本次启动是否静默。
-                // 仅系统自启（精确 `--hidden` 参数）进入静默托盘，普通启动立即显示主窗口。
-                tray::setup_startup_visibility(
-                    app.handle(),
-                    tray::is_silent_startup(std::env::args()),
-                );
             }
             // README 截图模式只渲染前端虚构数据，禁止读取账号后执行签到、轮换或保活。
             if !is_screenshot_demo() {
                 spawn_background_loops();
+            }
+            #[cfg(desktop)]
+            {
+                let magpie_started = !open_workbuddy && magpie::launch(silent);
+                tray::setup_startup_visibility(app.handle(), silent || magpie_started);
             }
             // 白屏自愈：前端挂载后会调 ui_ready，等不到就 reload → 再不行就用干净 profile 重建。
             webview_guard::spawn_watchdog(app.handle().clone());

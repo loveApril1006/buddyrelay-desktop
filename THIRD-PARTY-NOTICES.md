@@ -2,6 +2,10 @@
 
 本仓库以 [MIT 许可](./LICENSE)发布。下列项目的版权声明与许可条款一并适用。
 
+## yetone/magpie
+
+Windows 整合安装包从 [Magpie v0.1.4456 源码](https://github.com/yetone/magpie/tree/54117164cd593493bfafcc0dc4ac8bae95798b88)构建 Magpie。Magpie 原版 MIT 许可与第三方声明随安装包分发，位于 `magpie/LICENSE` 和 `magpie/THIRD_PARTY_NOTICES`。
+
 ## changexbc/workbuddy-switch
 
 - 仓库：https://github.com/changexbc/workbuddy-switch

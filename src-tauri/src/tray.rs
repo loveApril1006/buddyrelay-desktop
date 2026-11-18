@@ -38,6 +38,7 @@ pub fn setup(app: &mut tauri::App) -> tauri::Result<()> {
         .show_menu_on_left_click(true)
         .on_menu_event(|app, event| match event.id().as_ref() {
             "open-main-window" => show_main_window(app),
+            "open-magpie" => crate::magpie::open(app),
             "reload-ui" => crate::webview_guard::reload_main(app),
             "open-github" => open_github(app),
             "checkin-all" => start_checkin_all(app),
@@ -449,7 +450,13 @@ fn refresh_tray_menu<R: Runtime>(app: &AppHandle<R>) {
 }
 
 fn build_tray_menu<R: Runtime, M: Manager<R>>(app: &M) -> tauri::Result<Menu<R>> {
-    let open_item = MenuItem::with_id(app, "open-main-window", "打开主界面", true, None::<&str>)?;
+    let has_magpie = crate::magpie::available();
+    let open_label = if has_magpie {
+        "WorkBuddy 管理"
+    } else {
+        "打开主界面"
+    };
+    let open_item = MenuItem::with_id(app, "open-main-window", open_label, true, None::<&str>)?;
     // 白屏时 WebView 起不来，但托盘菜单是原生实现、仍然可用 —— 这是用户唯一的自救入口。
     let reload_item = MenuItem::with_id(app, "reload-ui", "重载界面", true, None::<&str>)?;
     let github_item = MenuItem::with_id(app, "open-github", "打开 GitHub", true, None::<&str>)?;
@@ -478,8 +485,12 @@ fn build_tray_menu<R: Runtime, M: Manager<R>>(app: &M) -> tauri::Result<Menu<R>>
     )?;
     let quit_item = MenuItem::with_id(app, "quit-app", "退出应用", true, None::<&str>)?;
 
-    MenuBuilder::new(app)
-        .item(&open_item)
+    let mut menu = MenuBuilder::new(app);
+    if has_magpie {
+        let magpie = MenuItem::with_id(app, "open-magpie", "打开 Magpie", true, None::<&str>)?;
+        menu = menu.item(&magpie);
+    }
+    menu.item(&open_item)
         .item(&reload_item)
         .item(&github_item)
         .item(&checkin_item)
@@ -542,7 +553,10 @@ mod tests {
     /// 回归：普通启动必须显示窗口。
     #[test]
     fn normal_startup_shows_window() {
-        assert_eq!(startup_window_action(false, false), StartupWindowAction::Show);
+        assert_eq!(
+            startup_window_action(false, false),
+            StartupWindowAction::Show
+        );
     }
 
     /// 回归：静默启动（系统自启 `--hidden`）保持隐藏，不闪窗。
@@ -558,7 +572,10 @@ mod tests {
     /// 若此断言失败，说明又回到了「把残留的轻量模式当成重建信号」的锁死回路。
     #[test]
     fn leftover_lightweight_mode_still_shows_window() {
-        assert_eq!(startup_window_action(false, true), StartupWindowAction::Show);
+        assert_eq!(
+            startup_window_action(false, true),
+            StartupWindowAction::Show
+        );
         // 即使同时带 `--hidden`，也不能把窗口留在「已销毁」状态：
         // 轻量标志为真意味着 WebView 已不存在，保持隐藏会让用户永远看不到界面。
         assert_eq!(startup_window_action(true, true), StartupWindowAction::Show);

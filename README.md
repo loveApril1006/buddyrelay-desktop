@@ -11,7 +11,21 @@
   <strong>WorkBuddy / CodeBuddy 多账号切换 + 本地 OpenAI 兼容反代</strong>
 </p>
 
-BuddyRelay 基于 [cv-superding/WorkBuddy-Switch2api v1.6.30](https://github.com/cv-superding/WorkBuddy-Switch2api/releases/tag/v1.6.30)。本项目是独立社区项目，沿用原 MIT 许可与版权声明。
+BuddyRelay 的 Windows 安装包整合了 [WorkBuddy-Switch2api v1.6.30](https://github.com/cv-superding/WorkBuddy-Switch2api/releases/tag/v1.6.30) 和 [Magpie v0.1.4456](https://github.com/yetone/magpie/releases/tag/v0.1.4456)，并附带两者的 MIT 许可与版权声明。
+
+### Windows 整合版
+
+1. 从 [GitHub Releases](https://github.com/loveApril1006/buddyrelay-desktop/releases/latest) 下载 Windows x64 安装包。打开 **BuddyRelay** 会启动 Magpie 主界面和 WorkBuddy 托盘后台。
+2. 在 Magpie 顶栏选择 **WorkBuddy → 打开 WorkBuddy 管理**。这里保留国内版和国际版账号切换、账号池轮转、积分与签到、会话和缓存迁移、开机自启等桌面功能。WorkBuddy 托盘菜单也可以打开 Magpie。
+3. 在 WorkBuddy 管理中配置并启用 API 反代，再从 Magpie 顶栏选择 **接入国内反代** 或 **接入国际反代**。Magpie 会添加对应供应商，模型请求经由原 WorkBuddy 账号池。修改反代地址或 API Key 后可再次接入来更新供应商。
+
+国内和国际反代默认使用 `127.0.0.1:7863` 和 `127.0.0.1:7864`。Magpie 保留自己的网关、Web 管理、CLI、路由、供应商、用量、会话和插件。两个组件各自使用原有数据目录，WorkBuddy 的 OAuth 登录信息由 WorkBuddy 管理。反代接入需要本机监听地址，使用该入口现有的 API Key 配置。
+
+升级安装前可从两个托盘菜单退出，再运行新的 BuddyRelay 安装包。集成组件跟随 BuddyRelay 安装包更新。
+
+维护者可用 PowerShell 7 和 Go 1.26.8 执行 `./scripts/build-magpie.ps1`，再运行 `npm ci` 及 `npm run tauri -- build --target x86_64-pc-windows-msvc --bundles nsis --config src-tauri/tauri.bundled.json -- --locked`。脚本固定 Magpie 源码提交并校验归档 SHA-256，接入代码位于 [integration/magpie](./integration/magpie)。
+
+### WorkBuddy 功能
 
 WorkBuddy / CodeBuddy CLI / CodeBuddy CN IDE 账号切换桌面 App（Tauri），并在同一个进程里内置了一个
 OpenAI 兼容的本地网关：多账号池轮转、按分组挑选出站账号、请求用量一目了然。
@@ -25,12 +39,7 @@ OpenAI 兼容的本地网关：多账号池轮转、按分组挑选出站账号�
 - **用量统计** —— 反代请求数、输入输出 Token、按账号与按模型分布，落盘可查历史
 - **积分与签到** —— 积分到期监控、自动签到、Token 保活、CodeBuddy CLI 自动轮换
 
-> 反代和账号切换跑在**同一个进程**里，复用同一份账号库与刷新逻辑，
-> 不存在「两个进程各自刷新同一个 refresh token」的冲突。
-
-### 下载
-
-从 [GitHub Releases](https://github.com/loveApril1006/buddyrelay-desktop/releases/latest) 下载 Windows x64 安装包和 SHA-256 校验清单。其他平台可从源码构建。
+WorkBuddy 反代和账号切换复用同一份账号库与刷新逻辑。其他桌面平台和独立 Web 管理服务可从源码构建。
 
 
 ## 快速开始

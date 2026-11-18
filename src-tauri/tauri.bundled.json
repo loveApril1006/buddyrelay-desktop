@@ -1,0 +1,9 @@
+{
+  "bundle": {
+    "resources": {
+      "magpie-stage/magpie.exe": "magpie/magpie.exe",
+      "magpie-stage/LICENSE": "magpie/LICENSE",
+      "magpie-stage/THIRD_PARTY_NOTICES": "magpie/THIRD_PARTY_NOTICES"
+    }
+  }
+}

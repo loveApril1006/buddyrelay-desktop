@@ -1,0 +1,42 @@
+#buddyrelayOpen {
+  min-width: max-content;
+  padding: 0 8px;
+}
+
+#buddyrelayDialog {
+  width: min(420px, calc(100vw - 40px));
+  background: var(--card);
+  color: var(--fg);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 20px;
+}
+
+#buddyrelayDialog::backdrop {
+  background: rgb(0 0 0 / .32);
+}
+
+#buddyrelayDialog h2 {
+  margin: 0;
+  font-size: 17px;
+}
+
+#buddyrelayDialog .buddyrelay-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+#buddyrelayDialog button {
+  background: var(--pill);
+  color: var(--fg);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 6px 9px;
+  cursor: pointer;
+}
+
+#buddyrelayStatus {
+  min-height: 1.4em;
+  margin: 12px 0 0;
+}

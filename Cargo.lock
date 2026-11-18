@@ -449,7 +449,7 @@ dependencies = [
 
 [[package]]
 name = "buddyrelay"
-version = "1.6.31"
+version = "1.7.0"
 dependencies = [
  "indexmap 1.9.3",
  "objc2",
@@ -5233,7 +5233,7 @@ dependencies = [
 
 [[package]]
 name = "wb-switch-core"
-version = "1.6.31"
+version = "1.7.0"
 dependencies = [
  "aes",
  "aes-gcm",
@@ -5260,7 +5260,7 @@ dependencies = [
 
 [[package]]
 name = "wb-switch-server"
-version = "1.6.31"
+version = "1.7.0"
 dependencies = [
  "axum",
  "rust-embed",

@@ -24,14 +24,23 @@ jobs:
         with:
           target: x86_64-pc-windows-msvc
 
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.8'
+          cache: false
+
       - name: Validate release version
         run: node scripts/version.mjs check
 
       - name: Install frontend dependencies
         run: npm ci
 
+      - name: Build bundled Magpie from source
+        shell: pwsh
+        run: ./scripts/build-magpie.ps1
+
       - name: Build NSIS installer
-        run: npm run tauri -- build --target x86_64-pc-windows-msvc --bundles nsis -- --locked
+        run: npm run tauri -- build --target x86_64-pc-windows-msvc --bundles nsis --config src-tauri/tauri.bundled.json -- --locked
 
       - name: Stage installer and checksum
         shell: pwsh
@@ -69,4 +78,4 @@ jobs:
         run: |
           gh release create "$GITHUB_REF_NAME" release/* --repo "$GITHUB_REPOSITORY" \
             --verify-tag --title "BuddyRelay $GITHUB_REF_NAME" \
-            --notes "Windows x64 installer. Based on WorkBuddy-Switch2api v1.6.30 under MIT."
+            --notes "Windows x64 installer. Includes WorkBuddy-Switch2api v1.6.30 and Magpie v0.1.4456 under MIT."
