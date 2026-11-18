@@ -263,7 +263,7 @@ pub fn another_instance_running() -> bool {
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
     let Ok(output) = Command::new("tasklist")
-        .args(["/FI", "IMAGENAME eq wb-switch-rust.exe", "/NH", "/FO", "CSV"])
+        .args(["/FI", "IMAGENAME eq buddyrelay.exe", "/NH", "/FO", "CSV"])
         .creation_flags(CREATE_NO_WINDOW)
         .output()
     else {
@@ -272,9 +272,9 @@ pub fn another_instance_running() -> bool {
     let text = String::from_utf8_lossy(&output.stdout);
     let me = std::process::id().to_string();
     text.lines()
-        .filter(|line| line.contains("wb-switch-rust.exe"))
+        .filter(|line| line.contains("buddyrelay.exe"))
         .filter(|line| {
-            // CSV: "wb-switch-rust.exe","12345","Console",...
+            // CSV: "buddyrelay.exe","12345","Console",...
             let parts: Vec<&str> = line.split("\",\"").collect();
             !(parts.len() > 1 && parts[1].trim_matches('"') == me)
         })

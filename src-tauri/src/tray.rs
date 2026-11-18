@@ -15,7 +15,7 @@ use wb_switch_core::modules::{checkin, update};
 
 const TRAY_ID: &str = "main-menu-bar";
 pub(crate) const MAIN_WINDOW_LABEL: &str = "main";
-const DEFAULT_TOOLTIP: &str = "WorkBuddy-Switch2api";
+const DEFAULT_TOOLTIP: &str = "BuddyRelay";
 const CHECKIN_TOOLTIP_RESTORE_SECS: u64 = 8;
 
 /// 系统自启注册的启动参数：仅携带该精确参数的启动进入静默托盘模式。
@@ -402,7 +402,7 @@ fn notify_checkin<R: Runtime>(app: &AppHandle<R>, body: &str) {
     let _ = app
         .notification()
         .builder()
-        .title("WorkBuddy-Switch2api")
+        .title("BuddyRelay")
         .body(body)
         .show();
 }

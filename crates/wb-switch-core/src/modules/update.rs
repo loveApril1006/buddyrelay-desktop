@@ -1,7 +1,7 @@
-//! 自动更新：检查公开 GitHub Releases 版本 + 更新源配置。
+//! 版本更新：检查公开 GitHub Releases 版本和更新源配置。
 //!
 //! 对照 server.py `load_github_config` / `save_github_config` /
-//! `compare_versions` / `update_check`。下载安装走 tauri-plugin-updater（整包更新）。
+//! `compare_versions` / `update_check`。下载安装通过 GitHub Release 页面。
 //!
 //! 版本检查不走 GitHub API（避免 60 次/小时/IP 限流）：
 //! 1. 主端点：release 资产的 updater manifest（下载不计 API 配额）；
@@ -19,8 +19,8 @@ use crate::modules::config::{
 
 /// 应用当前版本（来自 Cargo.toml package.version）。
 pub const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
-pub const GITHUB_OWNER: &str = "cv-superding";
-pub const GITHUB_REPO: &str = "WorkBuddy-Switch2api";
+pub const GITHUB_OWNER: &str = "loveApril1006";
+pub const GITHUB_REPO: &str = "buddyrelay-desktop";
 
 /// 成功结果缓存有效期（6 小时）。自动轮询（30 分钟）命中缓存，不发网络请求；
 /// 设置页手动检查传 force=true 绕过缓存强制刷新。
@@ -35,7 +35,7 @@ struct CachedCheck {
 static CACHE: Mutex<Option<CachedCheck>> = Mutex::new(None);
 
 pub fn github_config_file() -> PathBuf {
-    store_dir().join("github_config.json")
+    store_dir().join("buddyrelay_release_config.json")
 }
 
 /// 读取更新源配置（兼容旧配置文件，但永不返回 token）。
@@ -64,11 +64,6 @@ pub fn load_github_config() -> Value {
                 should_normalize = v.get("token").is_some();
             }
         }
-    }
-    // 旧版本截图/配置曾使用 changexbc/wb-switch；迁移到实际公开仓库。
-    if owner == "changexbc" && repo == "wb-switch" {
-        repo = GITHUB_REPO.to_string();
-        should_normalize = true;
     }
     let normalized = json!({"owner": owner, "repo": repo, "proxy": proxy});
     if should_normalize {
@@ -328,25 +323,25 @@ mod tests {
 
     #[test]
     fn updater_manifest_urls_macos_skips_duplicate_fallback() {
-        let urls = updater_manifest_urls("cv-superding", "WorkBuddy-Switch2api", "macos", "aarch64");
+        let urls = updater_manifest_urls("loveApril1006", "buddyrelay-desktop", "macos", "aarch64");
         assert_eq!(
             urls,
             vec![
-                "https://github.com/cv-superding/WorkBuddy-Switch2api/releases/latest/download/latest.json",
-                "https://github.com/cv-superding/WorkBuddy-Switch2api/releases/latest/download/latest-macos-aarch64.json",
+                "https://github.com/loveApril1006/buddyrelay-desktop/releases/latest/download/latest.json",
+                "https://github.com/loveApril1006/buddyrelay-desktop/releases/latest/download/latest-macos-aarch64.json",
             ]
         );
     }
 
     #[test]
     fn updater_manifest_urls_windows_keeps_macos_compat() {
-        let urls = updater_manifest_urls("cv-superding", "WorkBuddy-Switch2api", "windows", "x86_64");
+        let urls = updater_manifest_urls("loveApril1006", "buddyrelay-desktop", "windows", "x86_64");
         assert_eq!(
             urls,
             vec![
-                "https://github.com/cv-superding/WorkBuddy-Switch2api/releases/latest/download/latest.json",
-                "https://github.com/cv-superding/WorkBuddy-Switch2api/releases/latest/download/latest-windows-x86_64.json",
-                "https://github.com/cv-superding/WorkBuddy-Switch2api/releases/latest/download/latest-macos-x86_64.json",
+                "https://github.com/loveApril1006/buddyrelay-desktop/releases/latest/download/latest.json",
+                "https://github.com/loveApril1006/buddyrelay-desktop/releases/latest/download/latest-windows-x86_64.json",
+                "https://github.com/loveApril1006/buddyrelay-desktop/releases/latest/download/latest-macos-x86_64.json",
             ]
         );
     }

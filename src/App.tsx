@@ -15,7 +15,7 @@ import TokenStatsPage from "@/pages/TokenStatsPage";
 import SettingsPage from "@/pages/SettingsPage";
 import { StatusDot, AppIconMark } from "@/components/product-marks";
 import { PageErrorBoundary } from "@/components/error-boundary";
-import { UpdateInstallDialog } from "@/components/update-install-dialog";
+import { openReleaseUrl } from "@/lib/update";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Toaster } from "@/components/ui/sonner";
@@ -28,7 +28,6 @@ import { useAccountsStore } from "@/stores/accounts";
 function UpdateCenter({ running }: { running: boolean | undefined }) {
   const version = useAccountsStore((s) => s.status?.version);
   const [info, setInfo] = useState<UpdateInfo | null>(null);
-  const [dialogOpen, setDialogOpen] = useState(false);
 
   useEffect(() => {
     let disposed = false;
@@ -68,7 +67,7 @@ function UpdateCenter({ running }: { running: boolean | undefined }) {
                     size="icon"
                     className="size-5 rounded-full p-0"
                     aria-label="更新"
-                    onClick={() => setDialogOpen(true)}
+                    onClick={() => void openReleaseUrl(info?.releaseUrl)}
                   >
                     <ArrowUp className="size-3" strokeWidth={2.5} aria-hidden="true" />
                   </Button>
@@ -79,11 +78,6 @@ function UpdateCenter({ running }: { running: boolean | undefined }) {
           </div>
         </div>
       </section>
-      <UpdateInstallDialog
-        open={dialogOpen}
-        onOpenChange={setDialogOpen}
-        update={info}
-      />
     </>
   );
 }
@@ -135,7 +129,7 @@ function Layout() {
                 fontWeight: 640,
               }}
             >
-              WorkBuddy-Switch2api
+              BuddyRelay
             </div>
             {demoModeEnabled && (
               <Badge variant="secondary" className="mt-1 h-5 border-0 px-1.5 text-[10px] text-sidebar-foreground/60 shadow-none">

@@ -12,8 +12,8 @@ fi
 
 for profile in debug release; do
   # 名字必须与 tauri.conf.json 的 productName 一致（改名后别忘了这里）
-  APP="target/$profile/bundle/macos/WorkBuddy-Switch2api.app"
-  [ -d "$APP" ] || APP="src-tauri/target/$profile/bundle/macos/WorkBuddy-Switch2api.app"
+  APP="target/$profile/bundle/macos/BuddyRelay.app"
+  [ -d "$APP" ] || APP="src-tauri/target/$profile/bundle/macos/BuddyRelay.app"
   [ -d "$APP" ] || APP="target/$profile/bundle/macos/workbuddy-switch.app"  # 兼容旧名
   if [ -d "$APP" ]; then
     rm -rf "$APP/Contents/Resources/dist" 2>/dev/null || true

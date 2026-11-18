@@ -896,7 +896,7 @@ pub fn export_bundle(
 /// 给人看的说明，放进包里。
 fn build_readme(edition: Edition, manifest: &Value, raw: u64, skipped: usize) -> String {
     let mut s = String::new();
-    s.push_str("WorkBuddy-Switch2api 迁移包\n");
+    s.push_str("BuddyRelay 迁移包\n");
     s.push_str("============================\n\n");
     s.push_str("这个包用于把 WorkBuddy 的会话与配置搬到另一台电脑（增量合并，\n");
     s.push_str("不会覆盖目标机器上已有的数据）。\n\n");
@@ -914,7 +914,7 @@ fn build_readme(edition: Edition, manifest: &Value, raw: u64, skipped: usize) ->
         s.push_str(&format!("跳过文件：{skipped} 个\n"));
     }
     s.push_str("\n怎么用\n------\n");
-    s.push_str("打开 WorkBuddy-Switch2api → 迁移 → 导入，选择本文件。\n");
+    s.push_str("打开 BuddyRelay → 迁移 → 导入，选择本文件。\n");
     s.push_str("导入前请完全退出 WorkBuddy 客户端；工具会自动备份本机数据。\n\n");
     s.push_str("目录说明\n--------\n");
     s.push_str("  manifest.json   包信息与清单（先读它就知道包里有什么）\n");

@@ -14,7 +14,7 @@ const host = process.env.TAURI_DEV_HOST;
 // 需要临时覆盖时用 VITE_PAGES_BASE 环境变量。
 const pagesDemoBase =
   // @ts-expect-error process is a nodejs global
-  process.env.VITE_PAGES_BASE || "/WorkBuddy-Switch2api/";
+  process.env.VITE_PAGES_BASE || "/buddyrelay-desktop/";
 // @ts-expect-error process is a nodejs global
 const base = process.env.VITE_PAGES_DEMO === "1" ? pagesDemoBase : "/";
 

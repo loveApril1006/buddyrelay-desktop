@@ -1,16 +1,16 @@
 {
-  "name": "workbuddy-switch2api",
+  "name": "buddyrelay-desktop",
   "private": true,
-  "version": "1.6.30",
+  "version": "1.6.31",
   "author": "cv-superding",
   "license": "MIT",
-  "homepage": "https://github.com/cv-superding/WorkBuddy-Switch2api",
+  "homepage": "https://github.com/loveApril1006/buddyrelay-desktop",
   "repository": {
     "type": "git",
-    "url": "https://github.com/cv-superding/WorkBuddy-Switch2api.git"
+    "url": "https://github.com/loveApril1006/buddyrelay-desktop.git"
   },
   "bugs": {
-    "url": "https://github.com/cv-superding/WorkBuddy-Switch2api/issues"
+    "url": "https://github.com/loveApril1006/buddyrelay-desktop/issues"
   },
   "type": "module",
   "scripts": {
@@ -22,8 +22,8 @@
     "build:demo": "tsc && VITE_DEMO_MODE=1 VITE_PAGES_DEMO=1 vite build",
     "preview": "vite preview",
     "tauri": "tauri",
-    "build:app": "TAURI_SIGNING_PRIVATE_KEY=\"$(cat \"$HOME/.wb-switch/wb-switch-updater.key\")\" TAURI_SIGNING_PRIVATE_KEY_PASSWORD=wb-switch-dev npm run tauri build -- --debug --bundles app; sh scripts/fix-app.sh",
-    "build:app:release": "TAURI_SIGNING_PRIVATE_KEY=\"$(cat \"$HOME/.wb-switch/wb-switch-updater.key\")\" TAURI_SIGNING_PRIVATE_KEY_PASSWORD=wb-switch-dev npm run tauri build -- --bundles app; sh scripts/fix-app.sh"
+    "build:app": "npm run tauri build -- --debug --bundles app && sh scripts/fix-app.sh",
+    "build:app:release": "npm run tauri build -- --bundles app && sh scripts/fix-app.sh"
   },
   "dependencies": {
     "@fontsource-variable/bricolage-grotesque": "^5.3.0",
@@ -41,7 +41,6 @@
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-dialog": "^2.7.2",
     "@tauri-apps/plugin-opener": "^2",
-    "@tauri-apps/plugin-updater": "^2.10.1",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "lucide-react": "^1.31.0",
@@ -62,7 +61,10 @@
     "@vitejs/plugin-react": "^4.6.0",
     "tailwindcss": "^4.3.3",
     "typescript": "~5.8.3",
-    "vite": "^7.0.4"
+    "vite": "7.3.7"
   },
-  "description": "WorkBuddy / CodeBuddy 多账号切换 + OpenAI 兼容反代"
+  "description": "WorkBuddy / CodeBuddy 多账号切换 + OpenAI 兼容反代",
+  "overrides": {
+    "source-map-js": "1.2.2"
+  }
 }

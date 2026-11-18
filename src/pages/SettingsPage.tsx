@@ -21,7 +21,6 @@ import type {
 } from "@/lib/types";
 import { GITHUB_RELEASE_URL, GITHUB_REPOSITORY_URL, openReleaseUrl } from "@/lib/update";
 import { cn } from "@/lib/utils";
-import { UpdateInstallDialog } from "@/components/update-install-dialog";
 import { DemoAction } from "@/components/demo-action";
 import { useAccountsStore } from "@/stores/accounts";
 
@@ -644,12 +643,11 @@ function useAuthFile(): string | undefined {
   return useAccountsStore((s) => s.status?.authFile);
 }
 
-/** 自动更新：检查公开 GitHub Releases 源 + 安装签名更新。 */
+/** 检查 GitHub Releases 并打开对应的下载页面。 */
 function UpdateCard() {
   const version = useAccountsStore((s) => s.status?.version);
   const [info, setInfo] = useState<UpdateInfo | null>(null);
   const [checking, setChecking] = useState(false);
-  const [installOpen, setInstallOpen] = useState(false);
   const [msg, setMsg] = useState<{ type: "ok" | "err"; text: string } | null>(null);
   const [githubConfig, setGithubConfig] = useState<GithubConfig>({});
   const [proxyUrl, setProxyUrl] = useState("");
@@ -719,7 +717,7 @@ function UpdateCard() {
   return (
     <SettingsGroup
       id="settings-updates"
-      title="自动更新"
+      title="版本更新"
     >
       <CardContent className="space-y-0 p-0">
         <div className="border-b border-border/60 px-4 py-3 text-sm sm:px-5">
@@ -743,7 +741,7 @@ function UpdateCard() {
 
         <SettingsFieldRow
           label="更新代理地址"
-          description="仅用于 GitHub 更新检查和安装包下载；留空表示关闭显式代理。"
+          description="用于 GitHub 版本检查。留空时使用默认网络连接。"
           htmlFor="update-proxy"
           className="bg-muted/25"
           operational
@@ -785,19 +783,9 @@ function UpdateCard() {
                 {info.releaseName && <span className="text-muted-foreground"> · {info.releaseName}</span>}
               </div>
               {info.hasUpdate && (
-                <DemoAction><Button size="sm" onClick={() => setInstallOpen(true)}>
+                <DemoAction><Button size="sm" onClick={() => void openReleaseUrl(info.releaseUrl)}>
                   <ArrowUpCircle />
-                  立即升级
-                </Button></DemoAction>
-              )}
-              {info.releaseUrl && (
-                <DemoAction><Button
-                  variant="link"
-                  size="sm"
-                  className="h-auto p-0"
-                  onClick={() => void openReleaseUrl(info.releaseUrl)}
-                >
-                  打开 GitHub Release
+                  下载更新
                 </Button></DemoAction>
               )}
             </AlertDescription>
@@ -811,11 +799,6 @@ function UpdateCard() {
             <AlertDescription>{msg.text}</AlertDescription>
           </Alert>
         )}
-        <UpdateInstallDialog
-          open={installOpen}
-          onOpenChange={setInstallOpen}
-          update={info}
-        />
       </CardContent>
     </SettingsGroup>
   );
@@ -940,7 +923,7 @@ export default function SettingsPage() {
     <div className="mx-auto min-w-0 w-full max-w-3xl px-4 py-6 sm:px-6 sm:py-8">
       <header className="mb-10 sm:mb-12">
         <h1 className="text-2xl font-semibold tracking-tight">设置</h1>
-        <p className="mt-2 text-sm leading-6 text-muted-foreground">自动签到、权限检测与自动更新配置。</p>
+        <p className="mt-2 text-sm leading-6 text-muted-foreground">自动签到、权限检测与版本更新。</p>
       </header>
 
       <div className="min-w-0 space-y-12">

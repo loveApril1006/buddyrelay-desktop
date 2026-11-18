@@ -1,434 +1,72 @@
-name: build
+name: Build and release BuddyRelay
 
 on:
   push:
     tags: ["v*"]
   workflow_dispatch:
-    inputs:
-      platform:
-        description: "Which platform to build. win-x64 produces a test installer without a GitHub Release."
-        type: choice
-        default: all
-        options:
-          - all
-          - win-x64
-          - mac-arm64
-          - mac-x64
-          - linux-x64
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  select-matrix:
-    name: Select platforms
-    runs-on: ubuntu-latest
-    outputs:
-      matrix: ${{ steps.set.outputs.matrix }}
-    steps:
-      - id: set
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          PLATFORM: ${{ inputs.platform }}
-        run: |
-          python3 - <<'PY'
-          import json, os
-          all_platforms = [
-              {
-                  "name": "mac-arm64",
-                  "os": "macos-14",
-                  "target": "aarch64-apple-darwin",
-                  "cli_bin": "wb-switch-darwin-arm64",
-                  "platform_tag": "darwin-arm64",
-                  "bundles": "app",
-                  "update_os": "macos",
-                  "update_arch": "aarch64",
-                  "update_bundle": "macos",
-                  "update_archive_name": "workbuddy-switch-macos-aarch64.app.tar.gz",
-              },
-              {
-                  "name": "mac-x64",
-                  "os": "macos-14",
-                  "target": "x86_64-apple-darwin",
-                  "cli_bin": "wb-switch-darwin-x64",
-                  "platform_tag": "darwin-x64",
-                  "bundles": "app",
-                  "update_os": "macos",
-                  "update_arch": "x86_64",
-                  "update_bundle": "macos",
-                  "update_archive_name": "workbuddy-switch-macos-x86_64.app.tar.gz",
-              },
-              {
-                  "name": "win-x64",
-                  "os": "windows-latest",
-                  "target": "x86_64-pc-windows-msvc",
-                  "cli_bin": "wb-switch-win32-x64.exe",
-                  "platform_tag": "win32-x64",
-                  "bundles": "nsis",
-                  "update_os": "windows",
-                  "update_arch": "x86_64",
-                  "update_bundle": "nsis",
-                  "update_archive_name": "workbuddy-switch-windows-x86_64-setup.exe",
-              },
-              {
-                  "name": "linux-x64",
-                  "os": "ubuntu-latest",
-                  "target": "x86_64-unknown-linux-gnu",
-                  "cli_bin": "wb-switch-linux-x64",
-                  "platform_tag": "linux-x64",
-                  "bundles": "deb,appimage",
-                  "update_os": "linux",
-                  "update_arch": "x86_64",
-                  "update_bundle": "appimage",
-                  # ⚠️ 这个文件名必须与下面 linux 分支里 cp 出来的目标名一致
-                  #    （manifest 里的下载 URL 直接用它）
-                  "update_archive_name": "WorkBuddy-Switch2api-linux-x86_64.AppImage",
-              },
-          ]
-          event = os.environ.get("EVENT_NAME", "")
-          platform = (os.environ.get("PLATFORM") or "all").strip()
-          if event != "workflow_dispatch" or platform in ("", "all"):
-              selected = all_platforms
-          else:
-              selected = [p for p in all_platforms if p["name"] == platform]
-              if not selected:
-                  raise SystemExit(f"unknown platform: {platform}")
-          matrix = json.dumps({"include": selected})
-          out = os.environ["GITHUB_OUTPUT"]
-          with open(out, "a", encoding="utf-8") as f:
-              f.write("matrix<<EOF\n")
-              f.write(matrix + "\n")
-              f.write("EOF\n")
-          PY
-
-  build:
-    name: ${{ matrix.name }}
-    needs: select-matrix
-    strategy:
-      fail-fast: false
-      matrix: ${{ fromJSON(needs.select-matrix.outputs.matrix) }}
-    runs-on: ${{ matrix.os }}
-    # 发布类步骤（npm publish / updater 清单）在没配置 secrets 时必须能优雅跳过。
-    # 否则 build 失败 → 依赖它的 release 也会被跳过 → 打不出 Release。
-    env:
-      HAS_NPM_TOKEN: ${{ secrets.NPM_TOKEN != '' }}
-      HAS_SIGNING_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY != '' }}
-      # 桌面产物名 = src-tauri/tauri.conf.json 里的 productName。
-      # ⚠️ 改了 productName 必须同步改这里（以及 scripts/make-dmg.sh、scripts/fix-app.sh），
-      #    否则 Tauri 产出的文件名与下面 test -f / make-dmg 的期望对不上，CI 直接失败。
-      PRODUCT: WorkBuddy-Switch2api
+  windows:
+    name: Build Windows x64 installer
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
-
-      # 版本号一致性：18 个位置（Rust workspace / 前端 / Tauri / 3 套 npm 包 /
-      # package-lock / Cargo.lock）必须全等于 [workspace.package].version，
-      # 且 tag 名必须与之一致。放在编译之前，1 秒就能拦住"版本漏改"这类问题。
-      - name: Check version consistency
-        run: node scripts/version.mjs check
+          node-version: 24
+          cache: npm
 
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
-          target: ${{ matrix.target }}
+          target: x86_64-pc-windows-msvc
 
-      # cargo 缓存：依赖 + 编译产物，增量编译大幅提速（Cargo.lock 不变时命中）
-      - name: Cache cargo
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-cargo-
+      - name: Validate release version
+        run: node scripts/version.mjs check
 
-      - name: Install Linux system dependencies
-        if: runner.os == 'Linux'
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Build NSIS installer
+        run: npm run tauri -- build --target x86_64-pc-windows-msvc --bundles nsis -- --locked
+
+      - name: Stage installer and checksum
+        shell: pwsh
         run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
-
-      # dmgbuild writes Finder metadata without opening Finder, so DMGs keep
-      # their large icons and drag arrow in headless macOS runners.
-      - name: Set up Python for dmgbuild
-        if: runner.os == 'macOS'
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-
-      - name: Install dmgbuild (macOS only)
-        if: runner.os == 'macOS'
-        shell: bash
-        run: |
-          DMGBUILD_VENV="$RUNNER_TEMP/dmgbuild-venv"
-          python3 -m venv "$DMGBUILD_VENV"
-          "$DMGBUILD_VENV/bin/python" -m pip install --disable-pip-version-check --no-input \
-            "dmgbuild==1.6.7"
-          echo "$DMGBUILD_VENV/bin" >> "$GITHUB_PATH"
-
-      # 前端构建产物（CLI 二进制 rust-embed 嵌入 + Tauri App 使用）
-      - name: Build frontend
-        run: |
-          npm install
-          npm run build
-
-      # CLI 二进制
-      - name: Build server binary
-        shell: bash
-        run: |
-          cargo build -p wb-switch-server --release --target ${{ matrix.target }}
-          mkdir -p dist-bin
-
-      # 打包本平台包并发布到 npm（CLI 二进制走 npm registry，Release 只留桌面 App）
-      # 仅 tag 发布；手动触发（例如只打 Windows 试装包）不得 npm publish。
-      - name: Publish platform package
-        if: startsWith(github.ref, 'refs/tags/v') && env.HAS_NPM_TOKEN == 'true'
-        shell: bash
-        env:
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: |
-          # 平台包目录名从主包名推导，改名后不会漏
-          PKG_NAME=$(node -p "require('./npm/package.json').name")
-          PKG_DIR="npm/platform/$PKG_NAME-${{ matrix.platform_tag }}"
-          # 用 tag 版本同步 platform 包版本（git 里的可能滞后）
-          VER="${GITHUB_REF_NAME#v}"
-          perl -pi -e "s/\"version\": \"[0-9.]+\"/\"version\": \"$VER\"/" "$PKG_DIR/package.json"
-          mkdir -p "$PKG_DIR/bin"
-          SRC="target/${{ matrix.target }}/release/wb-switch"
-          [ -f "$SRC.exe" ] && SRC="$SRC.exe"
-          cp "$SRC" "$PKG_DIR/bin/${{ matrix.cli_bin }}"
-          cd "$PKG_DIR"
-          printf '//registry.npmjs.org/:_authToken=%s\n' "$NPM_TOKEN" > .npmrc
-          npm publish --access public --registry=https://registry.npmjs.org
-
-      # 桌面 App（mac app / nsis exe / deb + AppImage）
-      - name: Build desktop app
-        shell: bash
-        env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-        run: |
-          VER="${GITHUB_REF_NAME#v}"
-          if ! [[ "$VER" =~ ^[0-9] ]]; then
-            VER=$(grep '^version' src-tauri/Cargo.toml | head -1 | sed 's/.*"\(.*\)"/\1/')
-          fi
-          BUNDLE_ROOT="target/${{ matrix.target }}/release/bundle"
-          # cargo cache 会保留旧 NSIS/DMG/AppImage；不清理就会把 0.1.17 一类产物带进 Release。
-          rm -rf "$BUNDLE_ROOT"
-          npm run tauri -- build --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
-          echo "bundle after build:"
-          find "$BUNDLE_ROOT" -type f | sort || true
-          if [ "${{ matrix.bundles }}" = "nsis" ]; then
-            STALE=$(find "$BUNDLE_ROOT" -type f -name '*-setup.exe' ! -name "${PRODUCT}_${VER}_x64-setup.exe" || true)
-            if [ -n "$STALE" ]; then
-              echo "error: stale Windows installer still present:" >&2
-              printf '%s\n' "$STALE" >&2
-              exit 1
-            fi
-            test -f "$BUNDLE_ROOT/nsis/${PRODUCT}_${VER}_x64-setup.exe"
-          fi
-          find "$BUNDLE_ROOT" -type f \
-            \( -name '*.dmg' -o -name '*.exe' -o -name '*.msi' -o -name '*.deb' \
-            -o -name '*.AppImage' \) \
-            -exec cp {} dist-bin/ \;
-          # mac：纯命令行打 dmg（CI 无 Finder，Tauri 自带的 bundle_dmg.sh 会失败）
-          if [ "${{ matrix.bundles }}" = "app" ]; then
-            sh scripts/make-dmg.sh "$VER" "${{ matrix.update_arch }}" "target/${{ matrix.target }}/release/bundle/macos/${PRODUCT}.app"
-            cp "${PRODUCT}_${VER}_${{ matrix.update_arch }}.dmg" dist-bin/
-          fi
-
-      - name: Generate updater manifest
-        if: matrix.update_arch != '' && env.HAS_SIGNING_KEY == 'true'
-        shell: bash
-        env:
-          UPDATE_OS: ${{ matrix.update_os }}
-          UPDATE_ARCH: ${{ matrix.update_arch }}
-          UPDATE_ARCHIVE_NAME: ${{ matrix.update_archive_name }}
-          BUNDLE_DIR: target/${{ matrix.target }}/release/bundle/${{ matrix.update_bundle }}
-        run: |
-          VER="${GITHUB_REF_NAME#v}"
-          if ! [[ "$VER" =~ ^[0-9] ]]; then
-            VER=$(grep '^version' src-tauri/Cargo.toml | head -1 | sed 's/.*"\(.*\)"/\1/')
-          fi
-          echo "updater bundle dir: $BUNDLE_DIR (version $VER)"
-          ls -la "$BUNDLE_DIR" || true
-          if [ "$UPDATE_OS" = "linux" ]; then
-            # Linux 有 AppImage / deb 两种安装形态：各自收集归档与签名，再生成两份 manifest。
-            # 本分支自己完成全部产物收集，不走下面 macOS / Windows 的公共尾部。
-            LINUX_ROOT="$(dirname "$BUNDLE_DIR")"
-            APPIMAGE="$(find "$LINUX_ROOT/appimage" -maxdepth 1 -type f -name '*.AppImage' | sort)"
-            DEB="$(find "$LINUX_ROOT/deb" -maxdepth 1 -type f -name '*.deb' | sort)"
-            APPIMAGE_COUNT=$(printf '%s\n' "$APPIMAGE" | sed '/^$/d' | wc -l | tr -d ' ')
-            DEB_COUNT=$(printf '%s\n' "$DEB" | sed '/^$/d' | wc -l | tr -d ' ')
-            if [ "$APPIMAGE_COUNT" != 1 ] || [ "$DEB_COUNT" != 1 ]; then
-              echo "error: expected exactly 1 .AppImage and 1 .deb, found $APPIMAGE_COUNT / $DEB_COUNT" >&2
-              printf 'appimage: %s\ndeb: %s\n' "$APPIMAGE" "$DEB" >&2
-              exit 1
-            fi
-            if [ ! -f "$APPIMAGE.sig" ] || [ ! -f "$DEB.sig" ]; then
-              echo "error: missing signature for $APPIMAGE or $DEB" >&2
-              exit 1
-            fi
-            cp "$APPIMAGE" "dist-bin/${PRODUCT}-linux-${UPDATE_ARCH}.AppImage"
-            cp "$APPIMAGE.sig" "dist-bin/${PRODUCT}-linux-${UPDATE_ARCH}.AppImage.sig"
-            cp "$DEB" "dist-bin/${PRODUCT}-linux-${UPDATE_ARCH}.deb"
-            cp "$DEB.sig" "dist-bin/${PRODUCT}-linux-${UPDATE_ARCH}.deb.sig"
-            UPDATE_VERSION="$VER" UPDATE_OS=linux UPDATE_ARCH="$UPDATE_ARCH" UPDATE_BUNDLE=appimage \
-              UPDATE_KEYS="linux-${UPDATE_ARCH}-appimage linux-${UPDATE_ARCH}" \
-              UPDATE_ARCHIVE_NAME="${PRODUCT}-linux-${UPDATE_ARCH}.AppImage" \
-              UPDATE_JSON_NAME="latest-linux-${UPDATE_ARCH}.json" \
-              BUNDLE_DIR="$LINUX_ROOT/appimage" sh scripts/gen-update-json.sh
-            UPDATE_VERSION="$VER" UPDATE_OS=linux UPDATE_ARCH="$UPDATE_ARCH" UPDATE_BUNDLE=deb \
-              UPDATE_KEYS="linux-${UPDATE_ARCH}-deb" \
-              UPDATE_ARCHIVE_NAME="${PRODUCT}-linux-${UPDATE_ARCH}.deb" \
-              UPDATE_JSON_NAME="latest-linux-deb-${UPDATE_ARCH}.json" \
-              BUNDLE_DIR="$LINUX_ROOT/deb" sh scripts/gen-update-json.sh
-            cp "$LINUX_ROOT/appimage/latest-linux-${UPDATE_ARCH}.json" dist-bin/
-            cp "$LINUX_ROOT/deb/latest-linux-deb-${UPDATE_ARCH}.json" dist-bin/
-            exit 0
-          fi
-          if [ "$UPDATE_OS" = "windows" ]; then
-            ARCHIVE="$BUNDLE_DIR/${PRODUCT}_${VER}_x64-setup.exe"
-          else
-            ARCHIVE="$(find "$BUNDLE_DIR" -maxdepth 1 -type f -name '*.app.tar.gz' | sort)"
-            COUNT=$(printf '%s\n' "$ARCHIVE" | sed '/^$/d' | wc -l | tr -d ' ')
-            if [ "$COUNT" != 1 ]; then
-              echo "error: expected exactly 1 .app.tar.gz, found $COUNT" >&2
-              printf '%s\n' "$ARCHIVE" >&2
-              exit 1
-            fi
-          fi
-          if [ ! -f "$ARCHIVE" ] || [ ! -f "$ARCHIVE.sig" ]; then
-            echo "error: missing signed updater archive ($ARCHIVE)" >&2
-            exit 1
-          fi
-          cp "$ARCHIVE" "dist-bin/$UPDATE_ARCHIVE_NAME"
-          cp "$ARCHIVE.sig" "dist-bin/$UPDATE_ARCHIVE_NAME.sig"
-          if [ "$UPDATE_OS" = "windows" ]; then
-            cmp -s "dist-bin/$UPDATE_ARCHIVE_NAME" "dist-bin/${PRODUCT}_${VER}_x64-setup.exe"
-          fi
-          UPDATE_VERSION="$VER" sh scripts/gen-update-json.sh
-          MANIFEST="$BUNDLE_DIR/latest-${UPDATE_OS}-${UPDATE_ARCH}.json"
-          test -f "$MANIFEST"
-          cp "$MANIFEST" dist-bin/
+          $app = Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json
+          $name = "$($app.productName)_$($app.version)_x64-setup.exe"
+          $path = Join-Path 'target/x86_64-pc-windows-msvc/release/bundle/nsis' $name
+          $sha = (Get-FileHash -Algorithm SHA256 -LiteralPath $path).Hash.ToLowerInvariant()
+          New-Item -ItemType Directory -Path release
+          Copy-Item -LiteralPath $path -Destination release
+          "$sha  $name" | Set-Content -Encoding ascii release/SHA256SUMS.txt
 
       - uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.name }}
-          path: dist-bin/
+          name: buddyrelay-windows-x64
+          path: release/
           if-no-files-found: error
 
-  # 所有平台包发布成功后，发布主包（optionalDependencies 引用平台包）
-  publish-main:
-    name: Publish npm main package
-    needs: build
-    if: startsWith(github.ref, 'refs/tags/v')
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-      - name: Publish main package
-        env:
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: |
-          if [ -z "$NPM_TOKEN" ]; then
-            echo "NPM_TOKEN 未配置 → 跳过 npm 发布（自编译版不需要往 npm 发包）"
-            exit 0
-          fi
-          cd npm
-          printf '//registry.npmjs.org/:_authToken=%s\n' "$NPM_TOKEN" > .npmrc
-          npm publish --access public --registry=https://registry.npmjs.org
-
   release:
-    name: Publish release assets
-    needs: build
+    name: Publish GitHub Release
     if: startsWith(github.ref, 'refs/tags/v')
+    needs: windows
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
-      - uses: actions/checkout@v4
-
-      # ⚠️ 必须按 pattern 过滤，不能全量下载：
-      #    docker/build-push-action 的 GHA 缓存会额外产出一个
-      #    `<owner>~<repo>~<hash>.dockerbuild` artifact，全量下载会把它一并拉下来，
-      #    解压失败 → "Artifact download failed after 5 retries" → release job 整个挂掉。
       - uses: actions/download-artifact@v4
         with:
-          path: artifacts
-          merge-multiple: true
-          pattern: "{linux-x64,mac-arm64,mac-x64,win-x64}"
+          name: buddyrelay-windows-x64
+          path: release
 
-      - name: Merge updater manifests
+      - name: Publish installer
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          if ls artifacts/latest-*.json >/dev/null 2>&1; then
-            python3 scripts/merge-update-manifests.py artifacts
-            # 缺平台是静默故障（Linux 曾因此收不到更新）→ 合并后强制校验键齐全
-            python3 - <<'PY'
-          import json, pathlib
-          need = {"darwin-aarch64", "darwin-x86_64", "linux-x86_64",
-                  "linux-x86_64-appimage", "linux-x86_64-deb",
-                  "windows-x86_64", "windows-x86_64-nsis"}
-          p = pathlib.Path("artifacts/latest.json")
-          have = set(json.loads(p.read_text(encoding="utf-8"))["platforms"])
-          missing = sorted(need - have)
-          if missing:
-              raise SystemExit(f"updater 清单缺平台: {missing}（有 {sorted(have)}）")
-          print("updater 清单平台齐全:", sorted(have))
-          PY
-          else
-            echo "没有 latest-*.json（未配置 updater 签名密钥）→ 跳过合并，只发布安装包"
-          fi
-
-      - name: Upload to GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: artifacts/*
-
-  # ---------------------------------------------------------------------------
-  # Docker 镜像 → GHCR：给「常驻部署」用（webui + API 反代常年挂着）。
-  #
-  # 独立一个 job、与安装包构建并行，互不阻塞。
-  # 用户侧不用本地编译 15 分钟：docker pull ghcr.io/<owner>/workbuddy-switch2api:latest
-  # ---------------------------------------------------------------------------
-  docker:
-    name: Publish Docker image (GHCR)
-    runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
-    permissions:
-      contents: read
-      packages: write
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: docker/setup-buildx-action@v3
-
-      - uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - id: meta
-        uses: docker/metadata-action@v5
-        with:
-          # ⚠️ GHCR 的镜像名必须全小写，而仓库名是 WorkBuddy-Switch2api
-          # ⇒ 这里手写小写名，别用 ${{ github.repository }}（带大写会被拒）
-          images: ghcr.io/${{ github.repository_owner }}/workbuddy-switch2api
-          tags: |
-            type=ref,event=tag
-            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
-
-      - uses: docker/build-push-action@v6
-        with:
-          context: .
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          # Rust 全量编译很慢，用 GHA 缓存把二次构建压下来。
-          # scope 固定为 docker，避免与其它 job 的缓存条目互相干扰。
-          cache-from: type=gha,scope=docker
-          cache-to: type=gha,mode=max,scope=docker
+          gh release create "$GITHUB_REF_NAME" release/* --repo "$GITHUB_REPOSITORY" \
+            --verify-tag --title "BuddyRelay $GITHUB_REF_NAME" \
+            --notes "Windows x64 installer. Based on WorkBuddy-Switch2api v1.6.30 under MIT."

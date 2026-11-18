@@ -1,12 +1,8 @@
-# WorkBuddy-Switch2api
-
-<p align="center">
-  <img src="docs/images/banner.png" alt="手绘动画风横幅：山坡小屋放出成串绿色与紫色的灯笼，全部汇入右侧一扇发光的石门，标题 WorkBuddy-Switch2api" />
-</p>
+# BuddyRelay
 
 <p align="center">
   <a href="./LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT" /></a>
-  <a href="https://github.com/cv-superding/WorkBuddy-Switch2api/releases/latest"><img src="https://img.shields.io/github/v/release/cv-superding/WorkBuddy-Switch2api?label=release" alt="Latest release" /></a>
+  <a href="https://github.com/loveApril1006/buddyrelay-desktop/releases/latest"><img src="https://img.shields.io/github/v/release/loveApril1006/buddyrelay-desktop?label=release" alt="Latest release" /></a>
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-4b5563.svg" alt="Platforms: Windows / macOS / Linux" />
   <img src="https://img.shields.io/badge/built%20with-Tauri%20%2B%20Rust-24C8DB.svg" alt="Built with Tauri + Rust" />
 </p>
@@ -15,9 +11,7 @@
   <strong>WorkBuddy / CodeBuddy 多账号切换 + 本地 OpenAI 兼容反代</strong>
 </p>
 
-<p align="center">
-  <sub>顶部横幅为 AI 生成的手绘风插画，非软件界面截图。</sub>
-</p>
+BuddyRelay 基于 [cv-superding/WorkBuddy-Switch2api v1.6.30](https://github.com/cv-superding/WorkBuddy-Switch2api/releases/tag/v1.6.30)。本项目是独立社区项目，沿用原 MIT 许可与版权声明。
 
 WorkBuddy / CodeBuddy CLI / CodeBuddy CN IDE 账号切换桌面 App（Tauri），并在同一个进程里内置了一个
 OpenAI 兼容的本地网关：多账号池轮转、按分组挑选出站账号、请求用量一目了然。
@@ -36,31 +30,21 @@ OpenAI 兼容的本地网关：多账号池轮转、按分组挑选出站账号�
 
 ### 下载
 
-- **桌面 App** —— 从 [GitHub Releases](https://github.com/cv-superding/WorkBuddy-Switch2api/releases/latest) 下载 macOS / Windows / Linux 安装包（推荐日常使用）
-- **npm / webui** —— 浏览器操作界面，从本仓库自行构建安装，见下方「快速开始」
-- **在线演示** —— [GitHub Pages 只读演示](https://cv-superding.github.io/WorkBuddy-Switch2api/)（账号、积分与请求记录均为虚构数据，所有业务操作已禁用）
+从 [GitHub Releases](https://github.com/loveApril1006/buddyrelay-desktop/releases/latest) 下载 Windows x64 安装包和 SHA-256 校验清单。其他平台可从源码构建。
+
 
 ## 快速开始
 
-### npm / webui（本地构建）
-
-浏览器操作界面，与桌面 App 共用同一套账号管理能力。包名为 `workbuddy-switch2api`（**尚未发布到 npm**，从本仓库构建安装；安装后可用的命令仍是 `workbuddy-switch`）：
+### Web 管理界面（本地构建）
 
 ```bash
-cd npm
-npm i -g .
-workbuddy-switch                      # 起服务 + 打开浏览器（默认 127.0.0.1:57890）
-workbuddy-switch serve --port 16060   # 换端口：界面里的接口地址跟着页面走，不用改配置
-workbuddy-switch serve --no-open      # 只起服务、不开浏览器（服务器 / WSL / SSH 转发用）
-workbuddy-switch status               # 终端查看当前账号
+npm ci
+npm run build
+cargo run --locked -p wb-switch-server -- serve --no-open
 ```
 
-webui 界面与桌面 App 一致：WorkBuddy / CodeBuddy CLI / CodeBuddy IDE 账号切换、积分到期监控、自动签到、会话复制与共享、API 反代、Token 统计与 token 保活。
+打开 `http://127.0.0.1:57890/`。Web 管理界面与桌面应用共用账号管理、积分、签到和 API 反代功能。
 
-前端是**同一份 `dist/`** 分别嵌进桌面 App 与 CLI 二进制的，所以两边观感与功能一致；
-只有「迁移」和「缓存迁移」依赖系统文件对话框 / NTFS 目录联接，在 webui 里会整页提示只在桌面端可用。
-
-<img src="docs/images/webui-accounts.png" alt="webui：浏览器里的账号管理页，与桌面 App 同一套界面" />
 
 ### Docker（常驻部署）
 
@@ -69,10 +53,7 @@ webui 界面与桌面 App 一致：WorkBuddy / CodeBuddy CLI / CodeBuddy IDE 账
 ```bash
 export WB_SWITCH_TOKEN=$(openssl rand -hex 16)   # 访问口令，必填
 
-# 用现成镜像（CI 每次发版推到 GHCR）
-docker compose -f docker-compose.ghcr.yml up -d
-
-# 或者本地构建（首次 Rust 全量编译，约 10~20 分钟）
+# 本地构建
 docker compose up -d --build
 
 # 浏览器打开： http://<这台机器的IP>:57890/?token=$WB_SWITCH_TOKEN
@@ -88,22 +69,10 @@ docker compose up -d --build
 
 ### 桌面 App
 
-前往 [GitHub Releases](https://github.com/cv-superding/WorkBuddy-Switch2api/releases/latest) 下载对应平台的安装包：
+Windows x64 发布包为 `BuddyRelay_<版本>_x64-setup.exe`。运行安装程序后可从开始菜单打开。构建其他平台的方法见 [开发指南](docs/DEVELOPMENT.md)。
 
-| 平台 | 安装包 | 安装方式 |
-| --- | --- | --- |
-| macOS Apple Silicon（M 系列，arm64） | `WorkBuddy-Switch2api_<版本>_aarch64.dmg` | 打开 DMG，将 `WorkBuddy-Switch2api.app` 拖入「应用程序」 |
-| macOS Intel（x86_64） | `WorkBuddy-Switch2api_<版本>_x86_64.dmg` | 打开 DMG，将 `WorkBuddy-Switch2api.app` 拖入「应用程序」 |
-| Windows x64 | `WorkBuddy-Switch2api_<版本>_x64-setup.exe` | 运行安装程序并按提示完成安装 |
-| Linux x64 | `WorkBuddy-Switch2api_<版本>_amd64.deb` / `WorkBuddy-Switch2api_<版本>_amd64.AppImage` | Debian/Ubuntu 安装 `.deb`；其他发行版可给 AppImage 添加执行权限后直接运行 |
+BuddyRelay 与 WorkBuddy-Switch2api 使用同一个 `~/.wb-switch` 数据目录。切换到 BuddyRelay 前，先从托盘退出 WorkBuddy-Switch2api，避免两个进程同时刷新账号或竞争反代端口。
 
-macOS 首次启动若提示无法验证开发者，先在 Finder 中按住 Control 点击应用并选择「打开」，或前往「系统设置 → 隐私与安全性」选择「仍要打开」。仅当安装包来自上述官方 Releases、且系统仍提示「已损坏」时，再执行：
-
-```bash
-xattr -rd com.apple.quarantine "/Applications/WorkBuddy-Switch2api.app"
-```
-
-应用能启动但切换账号时提示无权限，请参阅下方 [macOS 权限说明](#macos-权限说明)。
 
 ## 功能
 
@@ -184,7 +153,7 @@ xattr -rd com.apple.quarantine "/Applications/WorkBuddy-Switch2api.app"
 8. **CodeBuddy CLI**：账号页可一键接入/更新认证。macOS/Linux 使用 `apiKeyHelper`，Windows 使用 `~/.codebuddy/settings.json` 的 `env.CODEBUDDY_AUTH_TOKEN`（保留其他配置，不依赖 `.cmd` 跳板）。「切换 CodeBuddy」只更新后续加载会话使用的默认账号，当前运行会话不会切换；请由 ACP 重新加载会话，或重启 CodeBuddy CLI 后生效。普通 CLI 在同一进程中执行 `/resume` 不保证重新读取认证配置。
 9. **自动轮换**：设置 → CodeBuddy CLI 自动轮换，开启后后台按间隔检查，并把积分最紧迫的账号设为后续会话的默认账号（策略见下）；正在运行的当前会话不会被自动切换。Windows 会同步最新 Token 到 settings，但仍需重新加载会话或重启 CLI。
 10. **API 反代**：侧栏进入「API 反代」或「国际版 API 反代」，开启并保存后即可把 `http://127.0.0.1:7863/v1`（国内版）/ `http://127.0.0.1:7864/v1`（国际版）当作 OpenAI 基址使用；同页可按分组挑选参与轮转的账号、填写「额外放行模型」，并查看请求用量；不知道 `model` 该填什么时点旁边的「获取模型ID」。详见 [API 反代](#api-反代)。
-11. **更新**：发布包带签名更新清单，装过一次后可以在应用内一键升级；启动时也会检查 Releases 并在左下角提示新版本。签名密钥的维护须知见 [应用内自动更新](#应用内自动更新windows--macos--linux)。
+11. **更新**：应用会检查本仓库 Releases。发现新版本后可打开下载页。
 
 ## API 反代
 
@@ -301,27 +270,15 @@ Token 统计页按来源展示 Token 总览和每日趋势，覆盖 WorkBuddy、
 切换账号需要写入 WorkBuddy 认证文件，macOS 要求授权「App 管理」（或「完全磁盘访问」）：
 
 1. 首次切换报「无权限」时，点「打开系统设置」
-2. 优先在 **App 管理** 里打开 WorkBuddy-Switch2api 开关；若没有，则去 **完全磁盘访问** 把 WorkBuddy-Switch2api 拖进带箭头的框
+2. 优先在 **App 管理** 里打开 BuddyRelay 开关；若没有，则去 **完全磁盘访问** 把 BuddyRelay 拖进带箭头的框
 3. 授权后重启本应用生效；设置页「权限检测」可随时验证
 
 > webui 模式：由启动服务的终端进程权限决定；若终端已授权完全磁盘访问则无需额外操作。
 
-### 应用内自动更新（Windows / macOS / Linux）
+### 版本更新
 
-发布产物带 Tauri updater 签名与清单，装过一次以后可以在应用内直接升级：
+在「设置 → 版本更新」检查新版本，或打开 [GitHub Releases](https://github.com/loveApril1006/buddyrelay-desktop/releases/latest) 下载对应安装包。桌面版通过发布页安装新版本。
 
-- 每次 tag 发版，CI 会为四个平台产出 `.sig` 签名与 `latest.json` / `latest-<target>-<arch>.json`
-- 客户端从我们自己仓库的 Releases 拉清单（`tauri.conf.json` → `plugins.updater.endpoints`）
-- Linux 有两种安装形态，各发一份清单：AppImage（`latest-linux-x86_64.json`）与 deb（`latest-linux-deb-x86_64.json`）
-
-维护者须知（换签名密钥时）：
-
-1. 本机生成密钥对：`npx tauri signer generate -w "$HOME/.wb-switch/wb-switch-updater.key" -p <密码>`
-2. 公钥写进 `src-tauri/tauri.conf.json` 的 `plugins.updater.pubkey`
-3. 私钥与密码分别写进仓库 Actions secrets：`TAURI_SIGNING_PRIVATE_KEY`、`TAURI_SIGNING_PRIVATE_KEY_PASSWORD`
-4. **私钥丢了就再也签不出能被老客户端接受的更新**，注意备份
-
-> 签名的私钥只放在本机 `~/.wb-switch/wb-switch-updater.key` 与仓库 secrets 里，不要提交进 git。
 
 ### Linux 说明（密钥环）
 
@@ -394,15 +351,8 @@ WorkBuddy 的更新缓存是**按用户放的、不分产品**：
 
 ## 交流与反馈
 
-有问题、想反馈 bug，或者想聊聊用法，欢迎扫码进群。
+在 [GitHub Issues](https://github.com/loveApril1006/buddyrelay-desktop/issues) 提交问题。描述复现步骤和应用版本，请先移除账号令牌、API Key 以及请求正文。
 
-<p align="center">
-  <img src="docs/images/qq-group.png" alt="QQ 群 1124773537（dsh-ds-web-login）" width="380" />
-</p>
-
-<p align="center">
-  QQ 群：<strong>1124773537</strong>
-</p>
 
 ## 许可
 

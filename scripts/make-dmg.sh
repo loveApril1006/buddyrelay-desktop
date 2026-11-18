@@ -2,7 +2,7 @@
 # 纯命令行打 dmg（不依赖 Finder/AppleScript，CI 无头环境可用）
 # 用法：sh scripts/make-dmg.sh <版本> <arch> [.app 路径]
 #   arch: aarch64 | x64
-#   .app 路径默认 target/release/bundle/macos/WorkBuddy-Switch2api.app
+#   .app 路径默认 target/release/bundle/macos/BuddyRelay.app
 #   DMG 内含「应用程序」文件夹链接，拖入即安装到 /Applications
 #
 # ⚠️ 这里的 .app 名和输出 dmg 名**必须与 tauri.conf.json 的 productName 一致**，
@@ -17,7 +17,7 @@
 # users commonly do the same when running the release script locally.
 set -eu
 
-PRODUCT="WorkBuddy-Switch2api"
+PRODUCT="BuddyRelay"
 
 usage() {
   echo "用法: sh scripts/make-dmg.sh <版本> <arch> [.app 路径]" >&2

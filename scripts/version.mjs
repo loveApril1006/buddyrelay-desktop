@@ -116,7 +116,7 @@ function collect() {
  // Cargo.lock 里三个成员 crate 的版本
   if (existsSync(rel("Cargo.lock"))) {
     const lock = read("Cargo.lock");
-    for (const name of ["wb-switch-rust", "wb-switch-core", "wb-switch-server"]) {
+    for (const name of ["buddyrelay", "wb-switch-core", "wb-switch-server"]) {
       // ⚠️ 本机工作区的 Cargo.lock 是 CRLF，必须 \r?\n，否则永远匹配不到（会误报"缺失"）
       const m = lock.match(
         new RegExp(`name = "${name}"\\r?\\nversion = "([^"]+)"`),
