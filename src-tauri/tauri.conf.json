@@ -1,0 +1,56 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "WorkBuddy-Switch2api",
+  "version": "1.6.30",
+  "identifier": "com.wbswitch.app",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "WorkBuddy-Switch2api · WorkBuddy / CodeBuddy 多账号切换 + OpenAI 兼容反代",
+        "width": 1000,
+        "height": 720,
+        "minWidth": 720,
+        "minHeight": 520,
+        "decorations": true,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true,
+        "trafficLightPosition": {
+          "x": 16,
+          "y": 30
+        },
+        "visible": false
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "createUpdaterArtifacts": true,
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ]
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEUwODZFRjk3OTZBMTcyOApSV1FvRjJwNStXNElEaGlEOUdLQ3JwR0RrNjRYZUx1NmxZSGpTbVo5M3dIUER0R2M0RUtQZDlvRgo=",
+      "endpoints": [
+        "https://github.com/cv-superding/WorkBuddy-Switch2api/releases/latest/download/latest.json",
+        "https://github.com/cv-superding/WorkBuddy-Switch2api/releases/latest/download/latest-{{target}}-{{arch}}.json"
+      ]
+    }
+  }
+}

@@ -1,0 +1,63 @@
+[package]
+name = "wb-switch-rust"
+version.workspace = true
+description = "wb-switch —— WorkBuddy / CodeBuddy 多账号切换 + OpenAI 兼容反代（Rust/Tauri 版）"
+authors = ["cv-superding"]
+edition = "2021"
+repository = "https://github.com/cv-superding/WorkBuddy-Switch2api"
+homepage = "https://github.com/cv-superding/WorkBuddy-Switch2api"
+license = "MIT"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+# The `_lib` suffix may seem redundant but it is necessary
+# to make the lib name unique and wouldn't conflict with the bin name.
+# This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
+name = "wb_switch_rust_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[features]
+# 默认启用 custom-protocol：不开该 feature 的 `cargo build --release` 会产出加载
+# devUrl http://localhost:1420 的开发模式 exe，vite 未运行时窗口即报
+# “localhost 拒绝连接”。`tauri dev` 传 --no-default-features 并过滤本 feature，
+# `tauri build` 显式传 tauri/custom-protocol，两者均不受影响。
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+# 🔴 显式打开 indexmap 1.9 的 `std` feature —— 修 `schemars 0.8.22` 的 E0107。
+#
+# 根因：tauri-build → schemars 依赖 indexmap 1.9，但只开了 `serde-1`、没开 `std`；
+# 而 indexmap 1.9.3 的 build.rs 在没有显式 `std` 时会去**探测 sysroot**，
+# 该探测在 rustc 1.98 上失败 → 走「无默认参数」的结构体分支 →
+# schemars 的 `type Map<K,V> = indexmap::IndexMap<K,V>` 少一个泛型参数 → E0107。
+# 显式声明后走 build.rs 的第一条分支，不再探测。
+#
+# ⚠️ `[dependencies]` 与 `[build-dependencies]` **两边都要写** ——
+# resolver 2 不合并普通依赖图与 build 依赖图里的 feature。
+indexmap = { version = "1.9", features = ["std"] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-opener = "2"
+tauri-plugin-updater = "2"
+wb-switch-core = { path = "../crates/wb-switch-core" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+uuid = { version = "1", features = ["v4"] }
+tokio = { version = "1", features = ["rt", "sync", "time", "macros"] }
+tauri-plugin-notification = "2"
+tauri-plugin-dialog = "2.7.2"
+# 见上面 `[build-dependencies]` 的说明：这行是给 resolver 用的，源码里并未直接使用。
+indexmap = { version = "1.9", features = ["std"] }
+
+# 系统自启（开机静默启动）：仅桌面目标支持（macOS / Windows / Linux）。
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+tauri-plugin-autostart = "2"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSImage", "NSWorkspace"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSData", "NSString"] }

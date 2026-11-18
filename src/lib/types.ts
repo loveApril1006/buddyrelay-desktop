@@ -1,0 +1,961 @@
+// 与 Rust 后端命令返回结构对齐的类型定义（对照 server.py 各 API 响应）
+
+export interface AccountMeta {
+  id: string;
+  uid: string | null;
+  email: string | null;
+  nickname: string | null;
+  enterpriseName: string | null;
+  expiresAt: number | null;
+  refreshExpiresAt: number | null;
+  refreshedAt: number | null;
+  createdAt: number | null;
+  /** 上次被设为「当前账号」的时间（仅记录经由本工具发起的切换）。 */
+  lastSwitchedAt?: number | null;
+  needsRelogin: boolean;
+  needsReloginReason: string | null;
+  /** 凭据为加密信封（只能切换客户端）—— 中性能力边界，不是故障。 */
+  credentialsEncrypted?: boolean;
+  /** 账号分组："desktop"=桌面端 / "proxy"=反代API / 缺失=未分组 */
+  group?: string | null;
+  /** 客户端版本："domestic"=国内版（缺失时视为国内版）/ "international"=国际版 */
+  edition?: string | null;
+}
+
+/** 客户端版本的展示文案与进程名。 */
+export const EDITIONS = [
+  { value: "domestic", label: "国内版", processName: "WorkBuddy" },
+  { value: "international", label: "国际版", processName: "WorkBuddyAI" },
+] as const;
+
+export function editionLabel(edition?: string | null): string {
+  return edition === "international" ? "国际版" : "国内版";
+}
+
+/** 是否国际版（国内版是默认值，字段缺失也算国内版）。 */
+export function isInternational(acc: { edition?: string | null }): boolean {
+  return acc.edition === "international";
+}
+
+/** GET /api/editions —— 两个版本的客户端状态。 */
+export interface EditionStatus {
+  key: string;
+  label: string;
+  processName: string;
+  authFile: string;
+  authFileExists: boolean;
+  installed: boolean;
+  running: boolean;
+  currentUid: string | null;
+  snapshotExists: boolean;
+}
+
+/** 账号分组的合法取值与展示文案。 */
+export const ACCOUNT_GROUPS = [
+  { value: "", label: "未分组" },
+  { value: "desktop", label: "桌面端" },
+  { value: "proxy", label: "反代API" },
+] as const;
+
+export function accountGroupLabel(group?: string | null): string {
+  if (group === "desktop") return "桌面端";
+  if (group === "proxy") return "反代API";
+  return "未分组";
+}
+
+/** 鉴权文件里的「当前账号」展示字段（加密信封已被后端收敛成字符串或 null）。 */
+export interface CurrentAccount {
+  uid: string | null;
+  nickname: string | null;
+  email: string | null;
+}
+
+export interface AppStatus {
+  running: boolean;
+  authFile: string;
+  /** 国内版那份鉴权文件（`workbuddy-desktop.info`）里的当前账号。 */
+  current: CurrentAccount | null;
+  /** 国际版那份鉴权文件（`workbuddy-desktop-ai.info`）里的当前账号。 */
+  currentInternational: CurrentAccount | null;
+  appPath: string;
+  version: string;
+}
+
+export interface OAuthStartResult {
+  loginId: string;
+  verificationUri: string;
+  expiresIn: number;
+  /** 本次登录使用的档位：`domestic` / `international`。 */
+  edition?: string;
+}
+
+export interface OAuthPollResult {
+  done: boolean;
+  result?: AccountMeta;
+  error?: string;
+}
+
+/** 导出文件中的完整账号记录（含 token，仅导出命令返回；字段与账号库原始记录一致）。 */
+export interface AccountRecord {
+  id?: string;
+  uid?: string | null;
+  nickname?: string | null;
+  email?: string | null;
+  access_token?: string | null;
+  refresh_token?: string | null;
+  token_type?: string | null;
+  domain?: string | null;
+  expiresAt?: number | null;
+  refreshExpiresAt?: number | null;
+  auth_raw?: unknown;
+  profile_raw?: unknown;
+  createdAt?: number | null;
+  [key: string]: unknown;
+}
+
+/** 导入文件账号的脱敏预览（不含 token）。 */
+export interface ImportPreviewAccount {
+  index: number;
+  uid: string | null;
+  nickname: string | null;
+  email: string | null;
+  hasToken: boolean;
+  /**
+   * 凭据是 WorkBuddy 5.6 的加密信封：**可以导入**（切换账号只需原样写回），
+   * 但刷新 token / 签到 / 积分查询这些需要明文 token 的功能用不了。
+   */
+  encrypted?: boolean;
+}
+
+/** 导入结果计数。 */
+export interface ImportResult {
+  ok: boolean;
+  imported: number;
+  skipped: number;
+  overwritten: number;
+  /** 其中凭据是加密信封的数量（只能用于切换账号）。 */
+  encrypted: number;
+}
+
+export interface Session {
+  id: string;
+  title: string;
+  cwd: string;
+  updatedAt: number;
+  hasHistory: boolean;
+  /** WorkBuddy playground（侧栏「任务」）；缺省视为空间会话。 */
+  isPlayground?: boolean;
+}
+
+/** 账号间复制会话时，附属数据（工具输出 / 产物索引 / 任务 / 文件历史）的搬运统计。 */
+export interface CopySideStat {
+  sideFiles: number;
+  sideBytes: number;
+  /** 正文里引用到的附件（SHA256）个数。 */
+  blobsReferenced: number;
+  /** 引用了、但本地附件仓库里找不到的个数（正常应为 0）。 */
+  blobsMissing: number;
+  /** 源会话有工作区快照但没搬（体积可达数百 MB）。 */
+  snapshotNotCopied: boolean;
+  errors: string[];
+}
+
+export interface CopyResult {
+  id: string;
+  newId: string;
+  jsonlCopied: boolean;
+  /** 附属数据搬运统计（更早的版本没有这个字段）。 */
+  side?: CopySideStat;
+  mappingWritten: boolean;
+  backup: string;
+}
+
+export interface SwitchResult {
+  ok: boolean;
+  account: string;
+  backup: string | null;
+  /** 路径 C：把 user_id 置空，让所有账号共享同一份会话。不产生副本。 */
+  sessionShare?: {
+    total: number;
+    shared: number;
+    skippedClaw: number;
+    error?: string;
+  };
+  sessionCopy?: {
+    sourceUid: string;
+    targetUid: string;
+    copied: CopyResult[];
+    errors?: { id: string; error: string }[];
+  };
+}
+
+export interface CheckinConfig {
+  enabled: boolean;
+  /** Legacy persisted fields; accepted by the backend but ignored by scheduling. */
+  start_hour?: number;
+  end_hour?: number;
+  keepalive_days: number;
+  lazy_refresh_hours: number;
+}
+
+/** OpenAI 兼容反代的配置。 */
+/** 一个版本的接入点：开关、监听地址、API Key、账号名单**全部独立**。 */
+export interface ProxyEndpoint {
+  enabled: boolean;
+  /** `host:port`。 */
+  listen: string;
+  /** 留空 = 不鉴权（只在监听 127.0.0.1 时才建议留空）。 */
+  api_key: string;
+  /** 参与**这个入口**反代的 uid；留空 = 该版本的全部账号。 */
+  accounts: string[];
+  /**
+   * **额外放行**的模型：上游列表里没有、但本入口实测可用的。
+   *
+   * 上游的模型列表是给客户端 UI 看的展示列表，**不等于可用模型全集**
+   * （例：`deepseek-v4.1-flash` 在国际版上游能用，却没出现在国际版列表里）。
+   * 填进来的模型会并入本入口 `GET /v1/models`，并**跳过版本校验**。
+   */
+  extra_models: string[];
+}
+
+/** 反代配置：国内版与国际版各一个独立入口，互不影响。 */
+export interface ProxyConfig {
+  /** 国内版入口（`.workbuddy` / www.codebuddy.cn）。 */
+  domestic: ProxyEndpoint;
+  /** 国际版入口（`.workbuddy-ai` / www.workbuddy.ai）。 */
+  international: ProxyEndpoint;
+  /**
+   * 反代**出网**代理（反代请求上游时走它），形如 `http://127.0.0.1:7897`。
+   *
+   * 留空 = 直连，并且会显式关掉「跟随系统环境变量代理」。
+   * 字段名与后端 serde 保持一致（snake_case），否则保存时会被丢掉。
+   */
+  upstream_proxy?: string | null;
+}
+
+/** 某一个入口的运行状态。 */
+export interface ProxyEndpointStatus {
+  /** "domestic" | "international" */
+  edition: string;
+  label: string;
+  enabled: boolean;
+  listen: string;
+  hasApiKey: boolean;
+  /** 该入口的账号数（0 = 该版本的全部账号都参与）。 */
+  accountCount: number;
+  /** 是否正在监听该端口。 */
+  running: boolean;
+}
+
+export interface ProxyStatus {
+  /** 有没有**任何**入口在监听。 */
+  running: boolean;
+  endpoints: ProxyEndpointStatus[];
+}
+
+/** 「获取模型ID」的结果：客户端 model 字段该填什么。 */
+/** 一档（国内版 / 国际版）的模型列表。两版的模型不一样，所以分开看。 */
+export interface ProxyModelsEdition {
+  /** "domestic" | "international" */
+  edition: string;
+  label: string;
+  models: string[];
+  source: string;
+  sourceUrl: string;
+  /** 这一档没拉到时的原因；拉到则为 null。 */
+  error: string | null;
+}
+
+export interface ProxyModels {
+  /** 分档明细（拉的是哪一档就有几条）。 */
+  editions: ProxyModelsEdition[];
+  /** 扁平并集，兼容旧用法。 */
+  models: string[];
+  source: string;
+  sourceUrl: string;
+}
+
+export interface UsageBucket {
+  requests?: number;
+  errors?: number;
+  promptTokens?: number;
+  completionTokens?: number;
+  credit?: number;
+  nickname?: string;
+}
+
+/** 反代累计用量：总计 + 按账号 + 按模型 + 最近请求。 */
+export interface ProxyUsage {
+  updatedAt?: number;
+  total: UsageBucket;
+  byAccount: Record<string, UsageBucket>;
+  byModel: Record<string, UsageBucket>;
+  recent: Array<{
+    ts: number;
+    uid: string;
+    nickname?: string;
+    model: string;
+    stream: boolean;
+    ok: boolean;
+    promptTokens: number;
+    completionTokens: number;
+    credit?: number;
+  }>;
+}
+
+export interface CheckinLog {
+  ts: number;
+  accountId: string | null;
+  email: string;
+  result: string;
+  error?: string;
+}
+
+export interface CheckinResult {
+  result: string;
+  error?: string;
+}
+
+export interface TravelConfig {
+  enabled: boolean;
+}
+
+export type TravelStatusLabel = "untraveled" | "no-buddy" | "traveling" | "finished";
+
+export interface TravelStatus {
+  label: TravelStatusLabel;
+  rewardCredit: number | null;
+  locationName?: string | null;
+  arriveAt?: number | null;
+  /**
+   * 该账号所在档位是否支持成长中心。
+   * 国际版为 `false`（后端返回，前端据此隐藏旅行标签）。
+   */
+  supported?: boolean;
+}
+
+export interface AutoRotateConfig {
+  enabled: boolean;
+  check_interval_minutes: number;
+  cooldown_minutes: number;
+  min_gap_hours: number;
+  min_urgency_hours: number;
+  active_guard_minutes: number;
+  min_remaining_credits: number;
+}
+
+export interface RotateLog {
+  ts: number;
+  action: string;
+  reason?: string | null;
+  from?: { id: string; name?: string | null } | null;
+  to?: { id: string; name?: string | null } | null;
+}
+
+export interface RotateStatus {
+  config: AutoRotateConfig;
+  cliConfigured: boolean;
+  activeAccountId: string | null;
+  activeAccountName: string | null;
+  lastCheckAt: number | null;
+  lastSwitchAt: number | null;
+}
+
+export interface CreditResource {
+  packageCode: string | null;
+  packageName: string | null;
+  total: number;
+  remaining: number;
+  used: number;
+  status: number | null;
+  expireAt: number | null;
+  expired: boolean;
+  expiringSoon: boolean;
+}
+
+export interface CreditExpiry {
+  ok: boolean;
+  accountId?: string | null;
+  accountName?: string;
+  updatedAt?: number;
+  totalCapacity?: number;
+  totalRemaining?: number;
+  expiringSoonRemaining?: number;
+  expiredRemaining?: number;
+  soonestExpireAt?: number | null;
+  expiringSoon?: boolean;
+  expired?: boolean;
+  resources?: CreditResource[];
+  error?: string;
+}
+
+export interface CreditStatsSummary {
+  currentRemaining: number;
+  currentCapacity: number;
+  usageToday: number;
+  usage7Days: number;
+  usageThisMonth: number;
+  todayCheckedInAccounts: number;
+  todaySuccess: number;
+  todayAlready: number;
+  todayFailed: number;
+}
+
+export interface CreditStatsDailyPoint {
+  date: string;
+  usage: number;
+  /** 官方用量按模型聚合（全量，不受请求明细条数限制）；本地观察口径下为空 */
+  models?: { model: string; requestCount: number; credit: number }[];
+}
+
+export interface CreditStatsAccount {
+  accountId: string;
+  accountName: string;
+  isCurrent: boolean;
+  currentRemaining: number | null;
+  totalCapacity: number | null;
+  lastSnapshotAt: number | null;
+  usageToday: number;
+  usage7Days: number;
+  usageThisMonth: number;
+  checkedInToday: boolean | null;
+  checkinStatusToday: string | null;
+  lastCheckinAt: number | null;
+  lastCheckinResult: string | null;
+  /** 按账号的逐日观察消耗（缺省兼容旧后端）；官方可用时趋势图优先使用官方 daily */
+  daily?: CreditStatsDailyPoint[];
+}
+
+export interface CreditStatsUsageEvent {
+  kind: "usage";
+  ts: number;
+  date: string;
+  accountId: string;
+  accountName: string;
+  amount: number;
+}
+
+export interface CreditStatsCheckinEvent {
+  kind: "checkin";
+  ts: number;
+  date: string;
+  accountId: string | null;
+  accountName: string;
+  result: string;
+  error?: string | null;
+}
+
+export type CreditStatsEvent = CreditStatsUsageEvent | CreditStatsCheckinEvent;
+
+export type CreditOfficialUsageStatus = "complete" | "partial" | "unavailable";
+
+export interface CreditOfficialUsageSummary {
+  usageToday: number;
+  usage7Days: number;
+  usageThisMonth: number;
+}
+
+export interface CreditOfficialUsageModel {
+  model: string;
+  requestCount: number;
+  credit: number;
+}
+
+export interface CreditOfficialUsageAccount {
+  accountId: string;
+  accountName: string;
+  ok: boolean;
+  requestCount: number;
+  detailTruncated: boolean;
+  usageToday: number | null;
+  usage7Days: number | null;
+  usageThisMonth: number | null;
+  error?: string | null;
+  reportedTotal?: number | null;
+  fetchedCount?: number;
+  /** 缺省兼容旧后端响应。 */
+  models?: CreditOfficialUsageModel[];
+  /** 按账号的逐日官方消耗（全量聚合，不受 requests 明细上限影响；缺省兼容旧后端） */
+  daily?: CreditStatsDailyPoint[];
+}
+
+export interface CreditOfficialUsageRequest {
+  accountId: string;
+  accountName: string;
+  requestId: string;
+  credit: number;
+  model: string;
+  client: string;
+  requestTime: string;
+}
+
+export interface CreditOfficialUsageError {
+  accountId: string;
+  accountName: string;
+  error: string;
+}
+
+export interface CreditOfficialUsage {
+  status: CreditOfficialUsageStatus;
+  rangeStart: string;
+  rangeEnd: string;
+  /** 官方用量最近一次采集时间；缓存命中时保持采集当时的时间。 */
+  collectedAt?: number;
+  summary: CreditOfficialUsageSummary;
+  daily: CreditStatsDailyPoint[];
+  accounts: CreditOfficialUsageAccount[];
+  requests: CreditOfficialUsageRequest[];
+  /** 官方全部有效请求按模型汇总；不受 requests 明细上限影响。 */
+  models?: CreditOfficialUsageModel[];
+  detailLimitPerAccount: number;
+  errors: CreditOfficialUsageError[];
+}
+
+export interface CreditStatistics {
+  generatedAt: number;
+  retentionDays: number;
+  coverageStartAt: number | null;
+  summary: CreditStatsSummary;
+  daily: CreditStatsDailyPoint[];
+  accounts: CreditStatsAccount[];
+  events: CreditStatsEvent[];
+  /** 官方接口不可用时仍使用上述本地观察字段；缺省兼容旧后端。 */
+  officialUsage?: CreditOfficialUsage;
+}
+
+export interface TokenStatsTotals { total: number; input: number; output: number; cacheRead: number; cacheWrite: number; uncachedInput: number; records: number; cacheHitRate: number | null; }
+export interface TokenStatsGroup extends TokenStatsTotals { key: string; title?: string | null; project?: string; sessionId?: string; }
+export interface TokenStatsSource { source: "workbuddy" | "workbuddy-ai" | "codebuddy-cli" | "codebuddy-ide"; summary: TokenStatsTotals; models: TokenStatsGroup[]; projects: TokenStatsGroup[]; sessions: TokenStatsGroup[]; daily: TokenStatsGroup[]; /** Optional model-specific daily series for trend filtering. */ dailyByModel?: Record<string, TokenStatsGroup[]>; hours: TokenStatsGroup[]; filesScanned: number; parseErrors: number; coverageStartAt?: number | null; coverageEndAt?: number | null; }
+export interface TokenStatistics { generatedAt: number; rangeDays?: number | null; sources: TokenStatsSource[]; }
+
+export interface CodeBuddyCliStatus {
+  configured: boolean;
+  authMode?: "settings-env" | "api-key-helper";
+  environmentOverride?: boolean;
+  settingsPresent: boolean;
+  helperPresent: boolean;
+  helperSupportsAccountIds: boolean;
+  helperCurrent?: boolean;
+  migrationRequired?: boolean;
+  syncPending?: boolean;
+  /**
+   * 保活刷新刚写完账号库、settings 尚未跟上的正常中间态：稍候会自动完成，
+   * 不该提示用户「认证脱节」（否则每次启动都要弹一次）。
+   */
+  syncInProgress?: boolean;
+  activeIndex: number | null;
+  activeAccountId: string | null;
+  activeAccountName: string | null;
+  accountCount: number;
+  statePath: string;
+}
+
+export interface CodeBuddyCliSwitchResult {
+  ok: boolean;
+  configured: boolean;
+  synced: boolean;
+  verified?: boolean;
+  authMode?: "settings-env" | "api-key-helper";
+  activeIndex?: number;
+  activeAccountId?: string;
+  source?: string;
+  skipped?: boolean;
+  message?: string;
+  error?: string;
+}
+
+export interface CodeBuddyCliInstallResult {
+  ok: boolean;
+  configured: boolean;
+  helperPresent: boolean;
+  helperSupportsAccountIds: boolean;
+  verified?: boolean;
+  authMode?: "settings-env" | "api-key-helper";
+  message?: string;
+  error?: string;
+}
+
+export interface GithubConfig {
+  owner?: string;
+  repo?: string;
+  proxy?: string;
+}
+
+export interface UpdateInfo {
+  ok: boolean;
+  current?: string;
+  latest?: string;
+  latestTag?: string;
+  hasUpdate?: boolean;
+  releaseName?: string;
+  releaseUrl?: string;
+  publishedAt?: string;
+  error?: string;
+  message?: string;
+}
+
+/** CodeBuddy CN IDE（桌面客户端）状态；与 CodeBuddy CLI 独立。 */
+export interface CodeBuddyCnIdeStatus {
+  installed: boolean;
+  running: boolean;
+  dataDir: string | null;
+  dbPath: string | null;
+  dbExists: boolean;
+  appPath: string | null;
+  activeAccountId: string | null;
+  activeAccountName: string | null;
+  detectedFrom?: string;
+  statePath?: string;
+}
+
+export interface CodeBuddyCnIdeSwitchResult {
+  ok: boolean;
+  account: string;
+  accountId: string;
+  dbPath?: string;
+  restarted?: boolean;
+  message?: string;
+}
+
+// ---------------------------------------------------------------------------
+// 跨机器迁移包
+// ---------------------------------------------------------------------------
+
+/** 字节数 + 文件数。 */
+export interface TransferBytes {
+  bytes: number;
+  files: number;
+}
+
+/** 一个可导出的工作区（＝ projects/ 下的一个目录）。 */
+export interface TransferWorkspace {
+  slug: string;
+  cwd: string;
+  title: string;
+  sessions: number;
+  bytes: number;
+  files: number;
+}
+
+export interface TransferScanItem {
+  key: string;
+  label: string;
+  path: string;
+  isDir: boolean;
+  bytes: number;
+  files: number;
+  exists?: boolean;
+  optional?: boolean;
+}
+
+export interface TransferScan {
+  edition: string;
+  editionLabel: string;
+  dataDir: string;
+  uid: string | null;
+  workspaces: TransferWorkspace[];
+  workspaceCount: number;
+  sessionFiles: number;
+  config: TransferScanItem[];
+  extras: {
+    blobs: TransferBytes;
+    fileHistory: TransferBytes;
+    workspaceSnapshots: TransferBytes;
+    tasks: TransferBytes;
+    artifactIndex: TransferBytes;
+    database: { bytes: number };
+  };
+  scannedAt: number;
+}
+
+export interface TransferExportOptions {
+  slugs: string[];
+  includeConfig: boolean;
+  includePlugins: boolean;
+  includeFileHistory: boolean;
+  includeWorkspaceSnapshots: boolean;
+  includeCredentials: boolean;
+}
+
+export interface TransferExportResult {
+  path: string;
+  bytes: number;
+  rawBytes: number;
+  sessions: number;
+  workspaces: number;
+  blobs: number;
+  files: number;
+  skipped: string[];
+  credentials: boolean;
+}
+
+export interface TransferPreviewSession {
+  sid: string;
+  title: string;
+  slug: string;
+  updatedAt: number;
+  files: number;
+  bytes: number;
+  exists: boolean;
+}
+
+export interface TransferPreviewConfig {
+  key: string;
+  label: string;
+  isDir: boolean;
+  incoming: number;
+  incomingBytes: number;
+  missingLocally: number;
+  topItems: number;
+  sample: string[];
+}
+
+export interface TransferPreview {
+  ok: boolean;
+  path: string;
+  manifest: Record<string, unknown>;
+  source: {
+    edition?: string;
+    editionLabel?: string;
+    hostname?: string;
+    os?: string;
+    uid?: string;
+    dataDir?: string;
+  } | null;
+  options: Record<string, boolean> | null;
+  target: { edition: string; editionLabel: string; dataDir: string; uid: string | null };
+  sessions: TransferPreviewSession[];
+  summary: {
+    sessions: { total: number; new: number; existing: number };
+    blobs: { total: number; missing: number; bytesTotal: number; bytesMissing: number };
+    config: TransferPreviewConfig[];
+    db: Record<string, { incoming: number; existing: number; new: number }>;
+    dbNew: number;
+    credentials: { uid?: string; nickname?: string; hasAccessToken?: boolean } | null;
+  };
+  warnings: string[];
+}
+
+export interface TransferImportOptions {
+  sessionIds?: string[];
+  applySessions: boolean;
+  applyBlobs: boolean;
+  applyConfig: boolean;
+  configKeys?: string[];
+  applyDb: boolean;
+  applyCredentials: boolean;
+  /** 目标已有同名文件时是否覆盖（默认只补缺失）。 */
+  overwrite: boolean;
+  /** 把会话置为「共享」（user_id 清空），换账号/换机器都看得见。 */
+  shareSessions: boolean;
+}
+
+export interface TransferImportResult {
+  ok: boolean;
+  path: string;
+  sessions: { files: number; bytes: number; skipped: number; ids: number; shared: boolean };
+  blobs: { files: number; bytes: number; skipped: number };
+  config: {
+    newFiles: number;
+    mergedLeaves: number;
+    skipped: number;
+    bytes: number;
+    keys: string[];
+  };
+  db: Record<string, { inserted: number; skipped: number; total: number }>;
+  credentials: { written: boolean };
+  backup: { dir: string; files: number; bytes: number };
+  errors: string[];
+  notes: string[];
+}
+
+// ---------------------------------------------------------------------------
+// 缓存迁移（家目录跨盘搬迁 + 目录联接）
+// ---------------------------------------------------------------------------
+
+/** 一个待迁移的家目录数据目录。 */
+export interface CacheDirStatus {
+  /** 目录名，如 .workbuddy。 */
+  name: string;
+  /** 展示名，如「国内版 WorkBuddy」。 */
+  label: string;
+  path: string;
+  exists: boolean;
+  /** 已经是目录联接。 */
+  isLink: boolean;
+  linkTarget: string | null;
+  /** 遗留的 .moved-* 备份目录。 */
+  backup: string | null;
+  files: number;
+  bytes: number;
+  movable: boolean;
+  sizeText: string;
+  /** 这个目录的持有者应用此刻在跑（迁它之前必须先退掉那个应用）。 */
+  held: boolean;
+  /** 持有者进程名（held 为真时），如 WorkBuddy.exe。 */
+  heldBy: string[];
+}
+
+export interface CacheMoveDrive {
+  letter: string;
+  free: number;
+  total: number;
+  system: boolean;
+  freeText: string;
+  totalText: string;
+}
+
+export interface CacheMovePlan {
+  supported: boolean;
+  platformNote: string | null;
+  home: string;
+  destDefault: string;
+  dirs: CacheDirStatus[];
+  totalFiles: number;
+  totalBytes: number;
+  totalText: string;
+  /** 必须退出的进程；非空时 canRun 为 false。 */
+  blocking: string[];
+  /** 建议退出的进程（不阻塞）。 */
+  warnings: string[];
+  canRun: boolean;
+  blockedReason: string | null;
+  drives: CacheMoveDrive[];
+  hasDest: boolean;
+}
+
+export interface CacheMoveStep {
+  name: string;
+  ok: boolean;
+  message: string;
+}
+
+/** 一条迁移目标：迁哪个目录 + 它自己的目标根目录。 */
+export interface CacheMoveTarget {
+  /** 目录名，如 .workbuddy。 */
+  name: string;
+  /** 目标根目录；最终落点 = `<dest>\\<name>`。 */
+  dest: string;
+}
+
+/** 一个目录的最终落点。 */
+export interface CacheMovePlaced {
+  name: string;
+  from: string;
+  to: string;
+  files: number;
+  bytes: number;
+}
+
+export interface CacheMoveResult {
+  ok: boolean;
+  moved: string[];
+  backups: string[];
+  logs: CacheMoveStep[];
+  /** 每个目录实际搬到了哪里（两个版本可以落在不同的盘）。 */
+  placed: CacheMovePlaced[];
+}
+
+export interface CacheMoveRollbackResult {
+  ok: boolean;
+  restored: string[];
+  logs: CacheMoveStep[];
+}
+
+export interface CacheMoveProgress {
+  phase: string;
+  detail: string;
+  index: number;
+  total: number;
+  percent: number;
+}
+
+export interface CacheBackupItem {
+  path: string;
+  name: string;
+  files: number;
+  bytes: number;
+  sizeText: string;
+}
+
+export interface CacheVerifyResult {
+  dirs: CacheDirStatus[];
+  blocking: string[];
+  warnings: string[];
+  backups: CacheBackupItem[];
+}
+
+export interface CacheMoveCleanupResult {
+  ok: boolean;
+  removed: string[];
+  logs: CacheMoveStep[];
+}
+
+// ---------------------------------------------------------------------------
+// 更新防护
+// ---------------------------------------------------------------------------
+
+export interface UpdateGuardCacheFile {
+  /** 所在暂存目录（会暂存到两个位置）。 */
+  dir: string;
+  name: string;
+  bytes: number;
+  sizeText: string;
+  modified: string;
+}
+
+/** 一个 WorkBuddy 安装目录的身份（从 product.json 读出来）。 */
+export interface UpdateGuardInstall {
+  dir: string;
+  /** "domestic" | "international"；读不到就是 null。 */
+  edition: string | null;
+  label: string;
+  dataDirName: string | null;
+  endpoint: string | null;
+  isOversea: boolean | null;
+  version: string | null;
+  /** 目录里存在哪些启动器 exe。 */
+  exes: string[];
+  /** 最终生效值：`settings.json` 用户设置优先，其次 `product.json`。false 才是已关掉。 */
+  startupUpdate: boolean | null;
+  /** 单独把最高优先级那层（settings.json）的值带出来，便于排查「改了没生效」。 */
+  userFlag: boolean | null;
+  /** 身份与目录里的 exe 对不上时的提醒。 */
+  warning: string | null;
+}
+
+export interface UpdateGuardStatus {
+  supported: boolean;
+  platformNote: string | null;
+  /** 总开关：更新源黑洞 + 所有安装都关掉了启动静默更新。 */
+  disabled: boolean;
+  envName: string;
+  envValue: string | null;
+  blackhole: string;
+  /** 会暂存更新包的所有目录（两个）。 */
+  cacheDirs: string[];
+  cacheFiles: UpdateGuardCacheFile[];
+  cacheBytes: number;
+  cacheText: string;
+  /** 暂存目录里还有「会被应用」的包。 */
+  cacheActive: boolean;
+  /** 暂存目录是不是已被冻结（显式拒绝写入）。这一层与版本无关。 */
+  cacheFrozen: boolean;
+  installs: UpdateGuardInstall[];
+  /** 还没关掉「启动静默更新」的安装数。 */
+  installsNeedingPatch: number;
+  running: string[];
+}
+
+export interface UpdateGuardActionResult {
+  ok: boolean;
+  disabled?: boolean;
+  quarantined: string[];
+  freed: number;
+  freedText: string;
+  /** 被改了 product.json 的版本名。 */
+  patched?: string[];
+  /** 改 product.json 失败的原因。 */
+  patchErrors?: string[];
+  status: UpdateGuardStatus;
+}

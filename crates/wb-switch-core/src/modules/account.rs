@@ -1,0 +1,680 @@
+//! 账号存储：读取/写入 `~/.wb-switch/accounts.json`，与 Python 版共享数据目录。
+//!
+//! 对照 server.py `load_accounts` / `save_accounts` / `find_account` /
+//! `account_display_name` / `account_meta`。
+
+use serde_json::{json, Value};
+use std::collections::HashMap;
+use std::path::Path;
+
+use crate::modules::config::{accounts_file, atomic_write};
+
+fn load_accounts_from_path(path: &Path) -> Vec<Value> {
+    if let Ok(text) = std::fs::read_to_string(path) {
+        if let Ok(Value::Array(accounts)) = serde_json::from_str::<Value>(&text) {
+            return accounts;
+        }
+    }
+    vec![]
+}
+
+fn save_accounts_to_path(path: &Path, accounts: &[Value]) -> std::io::Result<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let content = serde_json::to_string_pretty(accounts).unwrap_or_default();
+    atomic_write(path, &content)
+}
+
+fn find_account_in(accounts: &[Value], account_id: &str) -> Option<Value> {
+    accounts
+        .iter()
+        .find(|account| {
+            account.get("id").and_then(Value::as_str) == Some(account_id)
+                || account.get("uid").and_then(Value::as_str) == Some(account_id)
+        })
+        .cloned()
+}
+
+fn delete_account_from_path(path: &Path, account_id: &str) -> Result<(), String> {
+    let mut accounts = load_accounts_from_path(path);
+    let before = accounts.len();
+    accounts.retain(|account| account.get("id").and_then(Value::as_str) != Some(account_id));
+    if accounts.len() == before {
+        return Err("账号不存在".to_string());
+    }
+    save_accounts_to_path(path, &accounts).map_err(|error| error.to_string())
+}
+
+/// 读取账号库；文件缺失或损坏返回空列表。
+pub fn load_accounts() -> Vec<Value> {
+    load_accounts_from_path(&accounts_file())
+}
+
+/// 写回账号库（原子写），保持原 JSON 数组结构。
+pub fn save_accounts(accounts: &[Value]) -> std::io::Result<()> {
+    save_accounts_to_path(&accounts_file(), accounts)
+}
+
+/// 按 id 或 uid 查找账号。
+pub fn find_account(account_id: &str) -> Option<Value> {
+    find_account_in(&load_accounts(), account_id)
+}
+
+/// 账号展示名（email → nickname → uid → unknown）。
+pub fn account_display_name(acc: &Value) -> String {
+    get_str(acc, "email")
+        .or_else(|| get_str(acc, "nickname"))
+        .or_else(|| get_str(acc, "uid"))
+        .unwrap_or_else(|| "unknown".to_string())
+}
+
+/// 把任意 JSON 值收敛成「字符串或 null」。
+///
+/// 不只是类型洁癖：前端把这些元数据字段**直接当 React 子节点渲染**，
+/// 一旦有对象漏过去就是 React #31（`Objects are not valid as a React child`），
+/// 整页白屏、连错误信息都看不到。
+///
+/// 2026-09-23 的 WorkBuddy 更新把 token 改成信封加密，鉴权文件里出现了
+/// `{ $wbEncrypted, envelope }` 这种对象；只要它顺着某个字段走到前端就必然白屏。
+/// 因此这里一律取字符串，非字符串（对象/数组/数字/布尔）统统降级为 null ——
+/// 宁可少一个字段，也不能让对象出到前端。
+fn str_or_null(v: Option<&Value>) -> Value {
+    match v {
+        Some(Value::String(s)) if !s.trim().is_empty() => Value::String(s.clone()),
+        _ => Value::Null,
+    }
+}
+
+/// 判断字段是否为 WorkBuddy 5.6 的加密信封对象（`{ $wbEncrypted, envelope }`）。
+///
+/// 采集、导出预览、导入判定共用同一实现，不要在调用方各写一份。
+pub fn is_envelope(v: &Value, key: &str) -> bool {
+    matches!(v.get(key), Some(Value::Object(map)) if map.contains_key("$wbEncrypted"))
+}
+
+/// 展示字段（uid / nickname / email …）的统一取值：**折叠成字符串或 null**。
+///
+/// 前端会把这些字段直接当 React 子节点渲染，对象漏过去就是 React #31 整页白屏
+/// （issue #100），所以预览接口必须走这里，不要直接 `item.get(...)`。
+pub fn display_value(v: &Value, key: &str) -> Value {
+    str_or_null(v.get(key))
+}
+
+/// 凭据字段（access_token / refresh_token）的取值口径：
+/// 非空明文串或 `$wbEncrypted` 加密信封都算「有凭据」，空串 / 普通对象不算。
+///
+/// 导入判定与采集保持一致：加密信封可以入库（切换账号只需要原样写回），
+/// 但需要明文 token 的功能（刷新、签到、积分查询）用不了。
+pub fn secret_value(v: &Value, key: &str) -> Option<Value> {
+    if is_envelope(v, key) {
+        return v.get(key).cloned();
+    }
+    get_str(v, key).map(Value::String)
+}
+
+/// 把任意 JSON 值收敛成「数字或 null」（兼容数字型字符串）。
+fn num_or_null(v: Option<&Value>) -> Value {
+    match v {
+        Some(Value::Number(n)) => Value::Number(n.clone()),
+        Some(Value::String(s)) => match s.trim().parse::<f64>() {
+            Ok(f) if f.is_finite() => json!(f),
+            _ => Value::Null,
+        },
+        _ => Value::Null,
+    }
+}
+
+/// 账号的展示元数据（不泄露 token）。对照 server.py `account_meta`。
+///
+/// ⚠️ 所有字段都必须经过 `str_or_null` / `num_or_null` 收敛，**不要**直接
+/// `acc.get(...)` 透传：原始值可能是对象，前端渲染为 React 子节点时会抛
+/// React #31 导致整窗白屏（见 `str_or_null` 的说明）。
+pub fn account_meta(acc: &Value) -> Value {
+    json!({
+        "id": str_or_null(acc.get("id")),
+        "uid": str_or_null(acc.get("uid")),
+        "email": str_or_null(acc.get("email")),
+        "nickname": str_or_null(acc.get("nickname")),
+        "enterpriseName": str_or_null(acc.get("enterpriseName")),
+        "expiresAt": num_or_null(acc.get("expiresAt")),
+        "refreshExpiresAt": num_or_null(acc.get("refreshExpiresAt")),
+        "refreshedAt": num_or_null(acc.get("refreshedAt")),
+        "createdAt": num_or_null(acc.get("createdAt")),
+        // 上次「被设为当前账号」的时间（仅记录经由本工具发起的切换，
+        // 在客户端里手动换号不会更新）。卡片悬浮提示用它。
+        "lastSwitchedAt": num_or_null(acc.get("lastSwitchedAt")),
+        "needsRelogin": acc.get("needs_relogin").and_then(|v| v.as_bool()) == Some(true),
+        "needsReloginReason": str_or_null(acc.get("needs_relogin_reason")),
+        // 凭据为加密信封（只能切换客户端）。前端据此显示中性徽标，
+        // 不与「需重新登录」混用 —— 前者是能力边界，后者才是故障。
+        "credentialsEncrypted": acc.get("credentials_encrypted").and_then(|v| v.as_bool()) == Some(true),
+        // 账号分组："desktop"=桌面端 / "proxy"=反代API / 缺失=未分组
+        "group": str_or_null(acc.get("group")),
+        // 客户端档位："domestic"=国内版（缺失时视为国内版）/ "international"=国际版
+        "edition": str_or_null(acc.get("edition")),
+    })
+}
+
+/// 取非空字符串字段；空/缺失返回 None。
+pub fn get_str(v: &Value, key: &str) -> Option<String> {
+    v.get(key)
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
+/// 账号库不变量：**每条记录都必须带 id**（空串视为缺失）。
+///
+/// 为什么会缺：导入 / 采集来的 JSON 可能没有 id；刷新回写按 id 匹配，
+/// 未命中就追加，于是无 id 记录每轮刷新都复制一份，后台签到/旅行/保活
+/// 反复全量刷新会把它放大成指数增长（上游 issue #111）。
+/// 这里统一补 id，写入路径不再产生无 id 记录。
+pub(crate) fn ensure_account_id(account: &mut Value) -> String {
+    if let Some(id) = get_str(account, "id") {
+        return id;
+    }
+    let id = uuid::Uuid::new_v4().to_string();
+    account["id"] = Value::String(id.clone());
+    id
+}
+
+/// 返回可用于 UID 缺失场景的真实邮箱。历史展示占位值不参与身份匹配。
+fn identity_email(account: &Value) -> Option<String> {
+    let email = get_str(account, "email")?;
+    if !email.contains('@')
+        || email.eq_ignore_ascii_case("unknown")
+        || email == "手动添加"
+        || get_str(account, "nickname").as_deref() == Some(email.as_str())
+        || get_str(account, "uid").as_deref() == Some(email.as_str())
+    {
+        return None;
+    }
+    Some(email.to_ascii_lowercase())
+}
+
+/// 按稳定身份将采集结果合并到账号列表，并返回最终持久化的账号。
+///
+/// 非空 UID 始终优先；仅当新账号没有 UID 时，才使用真实邮箱兜底。
+/// 命中已有身份时保留本地 id，避免调用方持有的账号引用失效。
+///
+/// **档位参与身份判定**：国内版与国际版是两套独立登录态（不同域名、不同认证文件），
+/// 同一个 uid 在两个档位下必须存成两条记录，否则切换会互相覆盖。
+pub fn upsert_collected_account(accounts: &mut Vec<Value>, mut collected: Value) -> Value {
+    use crate::modules::edition::edition_of;
+
+    let collected_edition = edition_of(&collected);
+    let collected_uid = get_str(&collected, "uid");
+    let collected_email = identity_email(&collected);
+    let matches_identity = |existing: &Value| {
+        if edition_of(existing) != collected_edition {
+            return false;
+        }
+        if let Some(uid) = collected_uid.as_deref() {
+            return get_str(existing, "uid").as_deref() == Some(uid);
+        }
+        collected_email
+            .as_deref()
+            .is_some_and(|email| identity_email(existing).as_deref() == Some(email))
+    };
+
+    let matching_indexes: Vec<usize> = accounts
+        .iter()
+        .enumerate()
+        .filter_map(|(index, existing)| matches_identity(existing).then_some(index))
+        .collect();
+
+    if let Some(&first_index) = matching_indexes.first() {
+        let existing = &accounts[first_index];
+        if let Some(existing_id) = existing.get("id").cloned() {
+            collected["id"] = existing_id;
+        }
+        if get_str(&collected, "uid").is_none() {
+            if let Some(existing_uid) = existing.get("uid").cloned() {
+                collected["uid"] = existing_uid;
+            }
+        }
+        if let Some(created_at) = existing.get("createdAt").cloned() {
+            collected["createdAt"] = created_at;
+        }
+        // 命中身份后补齐 id：老库里缺 id 的记录在这一步被收敛，
+        // 之后每轮刷新都按 id 命中，不再新增副本。
+        ensure_account_id(&mut collected);
+
+        for index in matching_indexes.into_iter().rev() {
+            accounts.remove(index);
+        }
+        accounts.insert(first_index.min(accounts.len()), collected.clone());
+    } else {
+        // 新账号同样必须带 id，否则下次刷新会再追加一条。
+        ensure_account_id(&mut collected);
+        accounts.push(collected.clone());
+    }
+
+    collected
+}
+
+/// 使用统一身份规则保存采集到的账号。
+pub fn save_collected_account(collected: Value) -> std::io::Result<Value> {
+    let mut accounts = load_accounts();
+    let saved = upsert_collected_account(&mut accounts, collected);
+    save_accounts(&accounts)?;
+    Ok(saved)
+}
+
+/// 按 id 覆盖写入账号库；id 缺失或未命中时按 uid 回退覆盖，仍未命中才追加。
+///
+/// 以前只按 id 匹配、未命中即追加：导入进来缺 id 的记录会在每次刷新回写时
+/// 多出一条副本（上游 issue #111）。现在三条路径都保证结果带 id，
+/// 并且按 uid 命中时保留本地 id，避免调用方手里的引用漂移。
+pub fn upsert_account(updated: &Value) -> std::io::Result<()> {
+    let mut accounts = load_accounts();
+    upsert_account_in(&mut accounts, updated);
+    save_accounts(&accounts)
+}
+
+/// 内存实现，便于单测。
+pub(crate) fn upsert_account_in(accounts: &mut Vec<Value>, updated: &Value) {
+    let id = get_str(updated, "id");
+    let id_index = id.as_deref().and_then(|id| {
+        accounts
+            .iter()
+            .position(|a| get_str(a, "id").as_deref() == Some(id))
+    });
+    let uid_index = if id_index.is_none() {
+        get_str(updated, "uid").as_deref().and_then(|uid| {
+            accounts
+                .iter()
+                .position(|a| get_str(a, "uid").as_deref() == Some(uid))
+        })
+    } else {
+        None
+    };
+
+    match id_index.or(uid_index) {
+        Some(index) => {
+            let mut next = updated.clone();
+            // 按 uid 命中时以本地 id 为准（即使刷新对象带了另一个 id）。
+            if uid_index.is_some() {
+                if let Some(local_id) = get_str(&accounts[index], "id") {
+                    next["id"] = Value::String(local_id);
+                }
+            }
+            ensure_account_id(&mut next);
+            accounts[index] = next;
+        }
+        None => {
+            let mut next = updated.clone();
+            ensure_account_id(&mut next);
+            accounts.push(next);
+        }
+    }
+}
+
+/// 构造与官方对齐的请求头。对照 server.py `build_auth_headers`。
+pub fn build_auth_headers(account: &Value) -> HashMap<String, String> {
+    let mut headers = HashMap::new();
+    headers.insert(
+        "Authorization".to_string(),
+        format!(
+            "Bearer {}",
+            get_str(account, "access_token").unwrap_or_default()
+        ),
+    );
+    headers.insert("Accept".to_string(), "application/json".to_string());
+    headers.insert("Content-Type".to_string(), "application/json".to_string());
+    if let Some(uid) = get_str(account, "uid") {
+        headers.insert("X-User-Id".to_string(), uid);
+    }
+    if let Some(eid) =
+        get_str(account, "enterpriseId").or_else(|| get_str(account, "enterprise_id"))
+    {
+        headers.insert("X-Enterprise-Id".to_string(), eid.clone());
+        headers.insert("X-Tenant-Id".to_string(), eid);
+    }
+    if let Some(domain) = get_str(account, "domain") {
+        headers.insert("X-Domain".to_string(), domain);
+    }
+    headers
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn account_meta_coerces_non_scalar_fields_to_null() {
+        // 回归：2026-09-23 WorkBuddy 更新后 token 变为信封加密，账号库里可能混入
+        // `{ $wbEncrypted, envelope }` 这类对象。若原样透传到前端被当 React 子节点
+        // 渲染，就是 React #31（Objects are not valid as a React child）→ 整窗白屏。
+        let envelope = json!({ "$wbEncrypted": true, "envelope": "BASE64..." });
+        let acc = json!({
+            "id": "a1",
+            "uid": "u1",
+            "email": envelope.clone(),
+            "nickname": envelope.clone(),
+            "enterpriseName": envelope.clone(),
+            "needs_relogin_reason": envelope.clone(),
+            "group": envelope.clone(),
+            "edition": envelope.clone(),
+            "expiresAt": envelope.clone(),
+            "refreshExpiresAt": json!([1, 2, 3]),
+            "refreshedAt": "1758700000000",
+            "createdAt": 42,
+        });
+        let meta = account_meta(&acc);
+        for key in [
+            "email",
+            "nickname",
+            "enterpriseName",
+            "needsReloginReason",
+            "group",
+            "edition",
+            "expiresAt",
+            "refreshExpiresAt",
+        ] {
+            assert_eq!(meta[key], Value::Null, "{key} 必须被收敛成 null，不能透传对象");
+        }
+        // 数字型字符串按数字出来，正常数字原样保留
+        assert_eq!(meta["refreshedAt"], json!(1758700000000.0));
+        assert_eq!(meta["createdAt"], json!(42));
+        assert_eq!(meta["id"], "a1");
+    }
+
+    #[test]
+    fn account_meta_old_behavior_would_leak_object() {
+        // 反向验证：确认「直接透传」的确会产出对象 —— 证明上面的收敛不是恒真断言。
+        let envelope = json!({ "$wbEncrypted": true, "envelope": "BASE64..." });
+        let acc = json!({ "id": "a1", "nickname": envelope.clone() });
+        assert!(acc.get("nickname").unwrap().is_object(), "旧行为：对象原样透传，正是白屏根因");
+        assert_eq!(account_meta(&acc)["nickname"], Value::Null, "新行为：已收敛");
+    }
+
+    #[test]
+    fn account_meta_strips_tokens() {
+        let acc = json!({
+            "id": "a1",
+            "uid": "u1",
+            "email": "x@y.z",
+            "nickname": "小明",
+            "enterpriseName": "某公司",
+            "access_token": "SECRET_ACCESS",
+            "refresh_token": "SECRET_REFRESH",
+            "expiresAt": 123456,
+            "needs_relogin": true,
+            "needs_relogin_reason": "刷新失败",
+        });
+        let meta = account_meta(&acc);
+        assert_eq!(meta["id"], "a1");
+        assert_eq!(meta["needsRelogin"], true);
+        assert_eq!(meta["needsReloginReason"], "刷新失败");
+        assert!(meta.get("access_token").is_none(), "不得泄露 token");
+        assert!(meta.get("refresh_token").is_none(), "不得泄露 token");
+    }
+
+    #[test]
+    fn account_display_name_priority() {
+        assert_eq!(
+            account_display_name(&json!({"email": "a@b.c", "nickname": "n"})),
+            "a@b.c"
+        );
+        assert_eq!(
+            account_display_name(&json!({"nickname": "n", "uid": "u"})),
+            "n"
+        );
+        assert_eq!(account_display_name(&json!({"uid": "u"})), "u");
+        assert_eq!(account_display_name(&json!({})), "unknown");
+    }
+
+    /// 账号库不变量：追加 / uid 回退覆盖都要带 id，且不得重复追加（上游 issue #111）。
+    #[test]
+    fn upsert_keeps_single_record_and_always_has_id() {
+        let mut accounts = vec![json!({
+            "id": "local-1",
+            "uid": "u1",
+            "nickname": "旧名",
+            "access_token": "t1",
+            "createdAt": 1,
+        })];
+
+        // ① 刷新对象没带 id，但 uid 命中 → 原地覆盖，保留本地 id，不新增记录
+        upsert_account_in(&mut accounts, &json!({ "uid": "u1", "nickname": "新名", "access_token": "t2" }));
+        assert_eq!(accounts.len(), 1, "uid 命中不该追加新记录");
+        assert_eq!(get_str(&accounts[0], "id").as_deref(), Some("local-1"), "本地 id 应保留");
+        assert_eq!(get_str(&accounts[0], "nickname").as_deref(), Some("新名"));
+
+        // ② 全新 uid → 追加，且必须自带 id
+        upsert_account_in(&mut accounts, &json!({ "uid": "u2", "nickname": "二号" }));
+        assert_eq!(accounts.len(), 2);
+        assert!(get_str(&accounts[1], "id").is_some(), "追加的记录必须带 id");
+
+        // ③ 再刷新一次同一个新账号 → 仍然只有两条（按 id 命中）
+        let second_id = get_str(&accounts[1], "id").unwrap();
+        upsert_account_in(&mut accounts, &json!({ "id": second_id, "uid": "u2", "nickname": "二号改" }));
+        assert_eq!(accounts.len(), 2, "重复刷新不该复制记录");
+    }
+
+    /// 无 id 的历史记录被采集覆盖时也要收敛出 id（否则每轮刷新都加一条副本）。
+    #[test]
+    fn collected_account_without_id_gets_one() {
+        let mut accounts: Vec<Value> = Vec::new();
+        let first = upsert_collected_account(&mut accounts, json!({ "uid": "u9", "nickname": "a" }));
+        assert!(get_str(&first, "id").is_some());
+        let second = upsert_collected_account(&mut accounts, json!({ "uid": "u9", "nickname": "b" }));
+        assert_eq!(accounts.len(), 1, "同身份采集不该新增记录");
+        assert_eq!(get_str(&second, "id"), get_str(&first, "id"), "id 应稳定");
+    }
+
+    #[test]
+    fn get_str_trims_and_filters_empty() {
+        assert_eq!(get_str(&json!({"k": "  v  "}), "k"), Some("v".to_string()));
+        assert_eq!(get_str(&json!({"k": "  "}), "k"), None);
+        assert_eq!(get_str(&json!({"k": 123}), "k"), None);
+    }
+
+    fn account(id: &str, uid: Option<&str>, nickname: &str, email: Option<&str>) -> Value {
+        json!({
+            "id": id,
+            "uid": uid,
+            "nickname": nickname,
+            "email": email,
+            "access_token": format!("token-{id}"),
+            "createdAt": 1,
+        })
+    }
+
+    #[test]
+    fn same_nickname_with_different_uids_is_retained() {
+        let mut accounts = vec![account("old", Some("uid-1"), "同名", Some("同名"))];
+        let saved =
+            upsert_collected_account(&mut accounts, account("new", Some("uid-2"), "同名", None));
+
+        assert_eq!(accounts.len(), 2);
+        assert_eq!(saved["id"], "new");
+    }
+
+    #[test]
+    fn same_uid_refresh_preserves_local_id_and_removes_duplicates() {
+        let mut accounts = vec![
+            account("stable", Some("uid-1"), "旧名称", Some("old@example.com")),
+            account("duplicate", Some("uid-1"), "重复记录", None),
+        ];
+        let saved = upsert_collected_account(
+            &mut accounts,
+            account("generated", Some("uid-1"), "新名称", None),
+        );
+
+        assert_eq!(accounts.len(), 1);
+        assert_eq!(saved["id"], "stable");
+        assert_eq!(saved["nickname"], "新名称");
+        assert_eq!(saved["access_token"], "token-generated");
+    }
+
+    #[test]
+    fn different_uids_with_same_real_email_are_retained() {
+        let mut accounts = vec![account(
+            "old",
+            Some("uid-1"),
+            "账号一",
+            Some("shared@example.com"),
+        )];
+        upsert_collected_account(
+            &mut accounts,
+            account("new", Some("uid-2"), "账号二", Some("shared@example.com")),
+        );
+
+        assert_eq!(accounts.len(), 2);
+    }
+
+    #[test]
+    fn real_email_is_fallback_only_when_collected_uid_is_missing() {
+        let mut accounts = vec![account("stable", None, "旧名称", Some("user@example.com"))];
+        let saved = upsert_collected_account(
+            &mut accounts,
+            account("generated", None, "新名称", Some("USER@example.com")),
+        );
+
+        assert_eq!(accounts.len(), 1);
+        assert_eq!(saved["id"], "stable");
+        assert_eq!(saved["nickname"], "新名称");
+    }
+
+    #[test]
+    fn legacy_synthetic_email_does_not_merge_accounts() {
+        let mut accounts = vec![account("old", None, "同名", Some("同名"))];
+        upsert_collected_account(&mut accounts, account("new", None, "同名", Some("同名")));
+
+        assert_eq!(accounts.len(), 2);
+    }
+
+    #[test]
+    fn persisted_same_name_accounts_can_be_found_and_deleted_independently() {
+        let test_dir = std::env::temp_dir().join(format!(
+            "wb-switch-same-name-{}",
+            uuid::Uuid::new_v4().simple()
+        ));
+        let path = test_dir.join("accounts.json");
+        let mut accounts = vec![];
+        upsert_collected_account(
+            &mut accounts,
+            account("account-1", Some("uid-1"), "同名用户", None),
+        );
+        upsert_collected_account(
+            &mut accounts,
+            account("account-2", Some("uid-2"), "同名用户", None),
+        );
+        save_accounts_to_path(&path, &accounts).expect("same-name accounts should persist");
+
+        let persisted = load_accounts_from_path(&path);
+        assert_eq!(
+            find_account_in(&persisted, "account-1").unwrap()["uid"],
+            "uid-1"
+        );
+        assert_eq!(
+            find_account_in(&persisted, "account-2").unwrap()["uid"],
+            "uid-2"
+        );
+
+        delete_account_from_path(&path, "account-1").expect("first account should delete");
+        let after_first_delete = load_accounts_from_path(&path);
+        assert!(find_account_in(&after_first_delete, "account-1").is_none());
+        assert_eq!(
+            find_account_in(&after_first_delete, "account-2").unwrap()["uid"],
+            "uid-2"
+        );
+
+        delete_account_from_path(&path, "account-2").expect("second account should delete");
+        assert!(load_accounts_from_path(&path).is_empty());
+        std::fs::remove_dir_all(&test_dir).expect("temporary account store should clean up");
+    }
+
+    #[test]
+    fn mark_switched_records_timestamp_for_matching_id() {
+        let mut accounts = vec![
+            json!({"id": "a1", "uid": "u1", "nickname": "一号"}),
+            json!({"id": "a2", "uid": "u2", "nickname": "二号"}),
+        ];
+
+        assert!(mark_switched_in(&mut accounts, "a2", 1_700_000_000_000));
+
+        assert_eq!(accounts[1]["lastSwitchedAt"], json!(1_700_000_000_000i64));
+        assert!(
+            accounts[0].get("lastSwitchedAt").is_none(),
+            "只应更新命中的那一条，不得波及别的账号"
+        );
+    }
+
+    #[test]
+    fn mark_switched_ignores_unknown_id() {
+        let mut accounts = vec![json!({"id": "a1", "uid": "u1"})];
+
+        assert!(!mark_switched_in(&mut accounts, "not-there", 1));
+        assert!(accounts[0].get("lastSwitchedAt").is_none());
+    }
+
+    /// 卡片悬浮提示直接渲染这个字段：必须是数字或 null。
+    /// 缺字段时不能漏成对象（那种值到前端就是 React #31 白屏）。
+    #[test]
+    fn account_meta_exposes_last_switched_at() {
+        let meta = account_meta(&json!({
+            "id": "a1",
+            "uid": "u1",
+            "lastSwitchedAt": 1_700_000_000_000i64
+        }));
+        assert_eq!(meta["lastSwitchedAt"], json!(1_700_000_000_000i64));
+
+        let empty = account_meta(&json!({"id": "a2", "uid": "u2"}));
+        assert!(empty["lastSwitchedAt"].is_null());
+    }
+}
+
+/// 删除账号（按 id）。
+pub fn delete_account(account_id: &str) -> Result<(), String> {
+    delete_account_from_path(&accounts_file(), account_id)
+}
+
+/// 记录账号「上次被设为当前账号」的时间（毫秒时间戳）。
+///
+/// 只在切换流程里调用。返回 `Ok(false)` 表示账号库里没有这个 id（此时不写盘）。
+///
+/// ⚠️ 调用方**不应**把这里的失败当成切换失败向上传播：认证文件才是决定登录身份的
+/// 东西，时间戳只是展示用的附属信息，写不进去顶多悬浮提示显示「暂无记录」。
+pub fn mark_switched(account_id: &str, at: i64) -> std::io::Result<bool> {
+    let mut accounts = load_accounts();
+    if !mark_switched_in(&mut accounts, account_id, at) {
+        return Ok(false);
+    }
+    save_accounts(&accounts)?;
+    Ok(true)
+}
+
+/// 内存实现，便于单测。命中返回 true 并写入时间戳，未命中返回 false。
+pub(crate) fn mark_switched_in(accounts: &mut [Value], account_id: &str, at: i64) -> bool {
+    match accounts
+        .iter_mut()
+        .find(|a| get_str(a, "id").as_deref() == Some(account_id))
+    {
+        Some(acc) => {
+            acc["lastSwitchedAt"] = json!(at);
+            true
+        }
+        None => false,
+    }
+}
+
+/// 导入本机当前账号（从认证文件读取）。
+pub fn import_local() -> Result<Value, String> {
+    import_local_for(crate::modules::edition::Edition::Domestic)
+}
+
+/// 从指定版本客户端的认证文件导入当前账号。
+pub fn import_local_for(edition: crate::modules::edition::Edition) -> Result<Value, String> {
+    let acc = crate::modules::auth_file::import_from_auth_file_for(edition)
+        .ok_or_else(|| format!("未读取到本机 {} 登录信息（该版本未登录或未安装）", edition.label()))?;
+    let saved = save_collected_account(acc).map_err(|e| e.to_string())?;
+    Ok(account_meta(&saved))
+}
+
+// 手动添加账号（token 方式）已随 UI 入口「手动添加」一并下线；
+// `identity_email` 中的 "手动添加" 占位过滤保留，用于兼容历史手动添加的旧账号。

@@ -1,0 +1,15 @@
+{
+  "name": "workbuddy-switch2api-darwin-arm64",
+  "version": "1.6.30",
+  "description": "workbuddy-switch2api platform binary (darwin-arm64)",
+  "os": [
+    "darwin"
+  ],
+  "cpu": [
+    "arm64"
+  ],
+  "files": [
+    "bin"
+  ],
+  "license": "MIT"
+}
