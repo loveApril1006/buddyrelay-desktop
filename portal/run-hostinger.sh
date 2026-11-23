@@ -19,11 +19,11 @@ export WB_SWITCH_HOME_OVERRIDE="$HOME/buddyrelay-portal/workbuddy-data"
 export WB_SWITCH_PORT=57890 WB_SWITCH_HOST=127.0.0.1 TZ=Asia/Shanghai
 while true; do
   if [ -x bin/wb-switch ] && { [ ! -f data/accounts.pid ] || ! kill -0 "$(cat data/accounts.pid)" 2>/dev/null; }; then
-    bin/wb-switch serve --no-open >>data/accounts.log 2>&1 &
+    bin/wb-switch serve --no-open >>data/accounts.log 2>&1 9>&- &
     echo $! > data/accounts.pid
   fi
   if [ ! -f data/portal.pid ] || ! kill -0 "$(cat data/portal.pid)" 2>/dev/null; then
-    /opt/alt/alt-nodejs24/root/usr/bin/node server.mjs >>data/portal.log 2>&1 &
+    /opt/alt/alt-nodejs24/root/usr/bin/node server.mjs >>data/portal.log 2>&1 9>&- &
     echo $! > data/portal.pid
   fi
   sleep 15

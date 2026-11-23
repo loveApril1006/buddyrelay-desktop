@@ -22,6 +22,8 @@
 
 `PORTAL_UPSTREAM` 默认 `http://127.0.0.1:3425/v1`，初始化 Magpie 来源。`PORTAL_UPSTREAM_KEY` 可在首次启动时设置其密钥。`PORTAL_ACCOUNT_API` 默认 `http://127.0.0.1:57890`，`PORTAL_ACCOUNT_TOKEN` 为本机账号管理服务口令，需与 `WB_SWITCH_TOKEN` 相同。
 
-Hostinger 当前部署使用 Node.js 24 私有进程和 PHP cURL 入口转发。`hostinger-index.php` 和 `hostinger.htaccess` 位于公开网站根目录，其余程序与数据在用户主目录下的私有 `buddyrelay-portal`。`run-hostinger.sh` 监督 Node 和 WorkBuddy 账号进程。进程监督器意外停止后，需要通过 SSH 重新启动，或在 hPanel 中设置定时启动。部署使用单个 Node 进程和 SQLite 文件。
+Hostinger 当前部署使用 Node.js 24 私有进程和 PHP cURL 入口转发，三个服务通过私有 Unix Socket 通信。`PORTAL_SOCKET` 为 Node 入口套接字路径，`PORTAL_SOCKET_DIR` 和 `WB_SWITCH_SOCKET_DIR` 指向存放账号服务及国内、国际反代套接字的私有目录。该部署适配共享主机对回环 TCP 的限制。
+
+`hostinger-index.php` 和 `hostinger.htaccess` 位于公开网站根目录，其余程序与数据在用户主目录下的私有 `buddyrelay-portal`。`run-hostinger.sh` 监督 Node 和 WorkBuddy 账号进程。进程监督器意外停止后，需要通过 SSH 重新启动，或在 hPanel 中设置定时启动。部署使用单个 Node 进程和 SQLite 文件。
 
 备份整个私有 data 目录时先暂停写入，或使用 SQLite 在线备份。数据库含密码哈希、上游 API Key、用户回答缓存及账单，需限制到部署账户可读。WorkBuddy 账号文件独立保存在 `workbuddy-data/.wb-switch`。
