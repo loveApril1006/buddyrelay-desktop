@@ -6,23 +6,53 @@ import { mkdirSync, readFileSync, writeFileSync, chmodSync, existsSync, unlinkSy
 import { Readable } from 'node:stream';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { spawn } from 'node:child_process';
+import { setTimeout as delay } from 'node:timers/promises';
 
 const root = dirname(fileURLToPath(import.meta.url));
 const derive = promisify(scrypt);
 const hash = text => createHash('sha256').update(text).digest('hex');
 const secret = () => randomBytes(32).toString('base64url');
-async function upstreamFetch(input, options = {}) {
-  const url = new URL(input);
-  const names = { '57890': 'accounts', '7863': 'domestic', '7864': 'international' };
-  const name = names[url.port];
-  if (!process.env.PORTAL_SOCKET_DIR || url.hostname !== '127.0.0.1' || !name) return fetch(input, options);
+const useHostingerSupervisor = process.platform === 'linux' && process.env.PORTAL_HOSTINGER_SUPERVISOR === '1';
+let lastSupervisorRequest = 0;
+
+function requestSupervisor() {
+  if (Date.now() - lastSupervisorRequest < 5000) return;
+  lastSupervisorRequest = Date.now();
+  const child = spawn('/bin/sh', [join(root, 'run-hostinger.sh'), '--ensure'], { stdio: 'ignore' });
+  child.once('error', error => console.error('无法启动 Hostinger 服务守护进程:', error.code));
+  child.unref();
+}
+
+function socketFetch(socketPath, url, options) {
   return new Promise((resolve, reject) => {
-    const request = http.request({ socketPath: join(process.env.PORTAL_SOCKET_DIR, name + '.sock'), path: url.pathname + url.search, method: options.method || 'GET', headers: options.headers, signal: options.signal }, response => {
+    const request = http.request({ socketPath, path: url.pathname + url.search, method: options.method || 'GET', headers: options.headers, signal: options.signal }, response => {
       resolve(new Response(response.statusCode === 204 ? null : Readable.toWeb(response), { status: response.statusCode, headers: response.headers }));
     });
     request.on('error', reject);
     request.end(options.body);
   });
+}
+
+async function upstreamFetch(input, options = {}) {
+  const url = new URL(input);
+  const names = { '57890': 'accounts', '7863': 'domestic', '7864': 'international' };
+  const name = names[url.port];
+  if (!process.env.PORTAL_SOCKET_DIR || url.hostname !== '127.0.0.1' || !name) return fetch(input, options);
+  const socketPath = join(process.env.PORTAL_SOCKET_DIR, name + '.sock');
+  const backoff = [250, 500, 1000, 2000, 3000];
+  for (const wait of backoff) {
+    try {
+      return await socketFetch(socketPath, url, options);
+    } catch (error) {
+      // A refused or missing socket fails before the request reaches WorkBuddy.
+      // Other failures may happen after a model call started and must not be retried.
+      if (!useHostingerSupervisor || error.syscall !== 'connect' || !['ENOENT', 'ECONNREFUSED'].includes(error.code)) throw error;
+      requestSupervisor();
+      await delay(wait, undefined, { signal: options.signal });
+    }
+  }
+  return socketFetch(socketPath, url, options);
 }
 const fail = (status, message) => { throw Object.assign(new Error(message), { status }); };
 const integer = (value, min, max) => {
@@ -514,6 +544,10 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   const port = Number(process.env.PORTAL_PORT || 8787);
   const socket = process.env.PORTAL_SOCKET;
   if (socket && existsSync(socket)) unlinkSync(socket);
+  if (useHostingerSupervisor) {
+    requestSupervisor();
+    setInterval(requestSupervisor, 60_000).unref();
+  }
   server.listen(socket ? { path: socket } : { port, host }, () => {
     if (socket) chmodSync(socket, 0o600);
     console.log(`BuddyRelay portal started. Admin credentials are in the private data directory.`);
