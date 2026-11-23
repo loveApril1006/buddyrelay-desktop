@@ -12,6 +12,7 @@ let history = [];
 let adminState;
 let adminTab = 'users';
 let loginTimer;
+let checkinTimer;
 
 async function api(path, body, options) {
   const res = await fetch(path, { method: body === undefined ? 'GET' : 'POST', headers: { 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body), ...options });
@@ -282,8 +283,32 @@ async function loadUsage() {
 $('#passwordForm').onsubmit = event => { event.preventDefault(); action(event.submitter, async () => { await api('/api/password', Object.fromEntries(new FormData(event.target))); location.reload(); }); };
 $('.admin-tabs').onclick = event => { const button = event.target.closest('[data-admin]'); if (button) { adminTab = button.dataset.admin; renderAdmin(); } };
 function renderAdmin() {
+  clearTimeout(checkinTimer);
   for (const b of document.querySelectorAll('[data-admin]')) b.classList.toggle('active', b.dataset.admin === adminTab);
   const area = $('#adminContent');
+  if (adminTab === 'checkin') {
+    area.innerHTML = `
+      <section class="card" id="checkinPanel">
+        <h2>WorkBuddy 自动签到</h2>
+        <p class="muted">账号服务启动时检查，每约 30 分钟为尚未签到的国内版账号补签。国际版不支持签到。</p>
+        <form id="checkinForm">
+          <label class="check"><input type="checkbox" name="enabled" disabled>开启自动签到</label>
+          <div class="inline-form">
+            <button type="submit" class="primary" disabled>保存设置</button>
+            <button type="button" class="secondary" id="runCheckin" disabled>立即签到</button>
+            <button type="button" class="text-button" id="refreshCheckin">刷新记录</button>
+          </div>
+        </form>
+        <p id="checkinStatus" class="muted" role="status">正在读取签到设置…</p>
+      </section>
+      <section class="card">
+        <h2>签到提交记录</h2>
+        <p class="muted">最多显示最近 30 天的 500 条记录。</p>
+        <div id="checkinLogs" class="table-scroll"></div>
+      </section>`;
+    loadCheckin($('#checkinPanel'));
+    return;
+  }
   if (adminTab === 'users') area.innerHTML = `<div class="card"><h2>用户与积分</h2><p class="muted">输入正数充值，负数扣减。每次操作会写入用户的积分流水。</p><div class="table-scroll"><table><thead><tr><th>用户</th><th>余额</th><th>调整积分</th><th>操作</th></tr></thead><tbody>${adminState.users.map(u => `<tr><td>${escape(u.email)}<small class="muted"> ${u.role === 'admin' ? '管理员' : u.disabled ? '已停用' : ''}</small></td><td>${points(u.balance)}</td><td><input class="price-edit" type="number" step="0.001" data-credit-input="${escape(u.id)}" placeholder="100"></td><td><button class="secondary" data-credit="${escape(u.id)}">调整</button> ${u.id === me.id ? '' : `<button class="text-button" data-disable="${escape(u.id)}" data-value="${u.disabled ? 0 : 1}">${u.disabled ? '启用' : '停用'}</button>`}</td></tr>`).join('')}</tbody></table></div></div>`;
   if (adminTab === 'models') area.innerHTML = `<div class="card"><div class="list-row"><h2>模型定价</h2><button id="syncModels" class="primary">同步上游模型</button></div><p class="muted">输入与输出价格为积分 / 千 Token。新同步的模型需要设置价格并启用。缓存命中只收按次费用 × 缓存收费比例。</p><div class="table-scroll"><table><thead><tr><th>模型</th><th>输入价格</th><th>输出价格</th><th>按次积分</th><th>缓存秒数</th><th>缓存收费 %</th><th>开放</th><th></th></tr></thead><tbody>${adminState.models.map(m => `<tr data-model-row="${escape(m.id)}"><td>${escape(m.id)}</td>${['input_rate','output_rate','request_fee','cache_ttl','cache_percent'].map(k => `<td><input class="price-edit small" name="${k}" type="number" min="0" step="${k === 'request_fee' ? '.001' : '1'}" value="${k === 'request_fee' ? m[k] / 1000 : m[k]}"></td>`).join('')}<td><input type="checkbox" name="enabled" ${m.enabled ? 'checked' : ''}></td><td><button class="secondary" data-save-model="${escape(m.id)}">保存</button></td></tr>`).join('')}</tbody></table></div></div>`;
   if (adminTab === 'sources') area.innerHTML = `<div class="card"><h2>上游来源</h2><p class="muted">Magpie 统一入口复用现有 WorkBuddy 账号池。也可接入其他 OpenAI 兼容来源，密钥仅在后台保存。</p>${adminState.channels.map(c => `<div class="list-row"><div>${escape(c.name)}<small>${escape(c.url)} · ${c.enabled ? '已启用' : '已停用'}</small></div><button class="secondary" data-edit-channel="${escape(c.id)}">编辑</button></div>`).join('')}<form id="channelForm" class="admin-form"><input name="id" type="hidden"><label>来源名称<input name="name" required></label><label>OpenAI Base URL<input name="url" type="url" placeholder="http://127.0.0.1:7863/v1" required></label><label>API Key<input name="key" type="password" autocomplete="off" placeholder="留空保留原密钥"></label><label class="check"><input name="enabled" type="checkbox" checked>启用</label><button class="primary">保存来源</button></form></div><form id="importForm" class="card"><h2>批量导入 WorkBuddy 账号</h2><p class="muted">使用 WorkBuddy 导出的账号 JSON 数组，由本机账号管理服务按 UID 合并。导入后在 WorkBuddy 管理中启用对应版本反代，并从 Magpie 接入该反代。</p><label>账号文件<input id="accountsFile" type="file" accept=".json,application/json"></label><label>账号 JSON<textarea name="accounts" class="accounts" placeholder='[{"uid":"...","access_token":"..."}]' required></textarea></label><button class="primary">导入账号</button></form>`;
@@ -291,6 +316,47 @@ function renderAdmin() {
   if (adminTab === 'sources') {
     area.insertAdjacentHTML('afterbegin', `<div class="card"><h2>WorkBuddy 账号池</h2><p class="muted">在官方页面逐个登录授权。完成后自动保存账号、开启对应版本的本机反代并同步模型，新模型可在定价页开放。</p><div class="inline-form"><button class="primary" data-oauth="domestic">添加国内账号</button><button class="secondary" data-oauth="international">添加国际账号</button><button class="text-button" id="refreshAccounts">刷新账号</button></div><div id="oauthProgress" role="status"></div><div id="accountList" class="muted">正在读取账号池…</div><div class="inline-form"><button class="secondary" data-connect-pool="domestic">接入已有国内账号池</button><button class="secondary" data-connect-pool="international">接入已有国际账号池</button></div></div>`);
     loadAccounts();
+  }
+}
+async function loadCheckin(panel) {
+  if (!panel.isConnected || $('#view-admin').hidden) return;
+  clearTimeout(checkinTimer);
+  const status = panel.querySelector('#checkinStatus');
+  const form = panel.querySelector('#checkinForm');
+  const enabled = form.elements.enabled;
+  try {
+    const state = await api('/api/admin/checkin');
+    if (!panel.isConnected || $('#view-admin').hidden) return;
+    if (enabled.disabled || enabled.checked === enabled.defaultChecked) enabled.checked = state.enabled;
+    if (enabled.disabled) {
+      enabled.disabled = false;
+      form.querySelector('[type="submit"]').disabled = false;
+    }
+    enabled.defaultChecked = state.enabled;
+    panel.querySelector('#runCheckin').disabled = !state.accountCount || state.run?.status === 'running';
+    const labels = { success: '签到成功', already: '已签到', error: '签到失败' };
+    $('#checkinLogs').innerHTML = state.logs.length ? `
+      <table>
+        <thead><tr><th scope="col">时间</th><th scope="col">账号</th><th scope="col">结果</th></tr></thead>
+        <tbody>${state.logs.map(log => `<tr><td>${date(log.ts)}</td><td>${escape(log.email || '未知账号')}</td><td>${escape(labels[log.result] || log.result)}</td></tr>`).join('')}</tbody>
+      </table>` : '<p class="empty-small">暂无签到提交记录。</p>';
+    let message = state.accountCount ? `账号池共 ${state.accountCount} 个账号。` : '账号池为空，请在「账号与来源」添加 WorkBuddy 国内版账号。';
+    if (state.run?.status === 'running') {
+      message = '正在签到。切换页面后，账号服务会继续处理。';
+      checkinTimer = setTimeout(() => {
+        if (panel.isConnected && !$('#view-admin').hidden) loadCheckin(panel);
+      }, 3000);
+    } else if (state.run?.status === 'done') {
+      const { success, already, error, unsupported } = state.run.counts;
+      if (success + already + error + unsupported) message = `最近一次手动签到 · 成功 ${success} · 已签到 ${already} · 失败 ${error} · 不支持 ${unsupported}`;
+    } else if (state.run?.status === 'busy') {
+      message = '账号服务正在执行另一轮签到，请稍后刷新记录。';
+    } else if (state.run?.status === 'unavailable') {
+      message = '未能取得上一次手动签到结果，请刷新记录确认。';
+    }
+    status.textContent = message;
+  } catch (error) {
+    status.textContent = error.message;
   }
 }
 async function loadAccounts() {
@@ -329,6 +395,15 @@ $('#adminContent').onclick = event => {
   if (!b) return;
   if (b.dataset.oauth) action(b, () => startOAuth(b.dataset.oauth));
   if (b.id === 'refreshAccounts') action(b, loadAccounts);
+  if (b.id === 'refreshCheckin') action(b, () => loadCheckin(b.closest('#checkinPanel')));
+  if (b.id === 'runCheckin') {
+    b.disabled = true;
+    const panel = b.closest('#checkinPanel');
+    api('/api/admin/checkin/run', {}).then(() => loadCheckin(panel)).catch(error => {
+      notice(error.message, true);
+      b.disabled = false;
+    });
+  }
   if (b.dataset.connectPool) action(b, async () => { await api('/api/admin/accounts/connect', { edition: b.dataset.connectPool }); await refreshAdmin(); notice('已有账号池已接入'); });
   if (b.id === 'syncModels') action(b, async () => { const result = await api('/api/admin/sync', {}); await refreshAdmin(); notice(`同步完成，共发现 ${result.count} 个模型。` + result.errors.join('，'), !!result.errors.length); });
   if (b.dataset.credit) action(b, async () => { const node = [...document.querySelectorAll('[data-credit-input]')].find(n => n.dataset.creditInput === b.dataset.credit); await api('/api/admin/credit', { id: b.dataset.credit, points: Number(node.value), operation: b.dataset.operation ||= crypto.randomUUID() }); await refreshAdmin(); notice('积分已调整'); });
@@ -341,6 +416,13 @@ $('#adminContent').onclick = event => {
 $('#adminContent').onsubmit = event => {
   event.preventDefault();
   if (event.target.id === 'channelForm') action(event.submitter, async () => { const form = event.target; await api('/api/admin/channel', { ...Object.fromEntries(new FormData(form)), enabled: form.elements.enabled.checked }); await refreshAdmin(); notice('来源已保存，请到模型定价页同步模型'); });
+  if (event.target.id === 'checkinForm') action(event.submitter, async () => {
+    const form = event.target;
+    const result = await api('/api/admin/checkin', { enabled: form.elements.enabled.checked });
+    form.elements.enabled.defaultChecked = result.enabled;
+    form.elements.enabled.checked = result.enabled;
+    notice(result.enabled ? '自动签到已开启' : '自动签到已关闭');
+  });
   if (event.target.id === 'importForm') action(event.submitter, async () => { const accounts = JSON.parse(event.target.elements.accounts.value); const result = await api('/api/admin/accounts/import', { accounts }); event.target.reset(); notice(`已导入 ${result.imported} 个账号，跳过 ${result.skipped} 个`); });
 };
 $('#adminContent').onchange = async event => {

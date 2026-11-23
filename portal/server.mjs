@@ -40,7 +40,13 @@ const verifyPassword = async (password, stored) => {
   return timingSafeEqual(actual, Buffer.from(digest, 'hex'));
 };
 
-export async function createPortal({ dataDir = process.env.PORTAL_DATA || join(root, 'data'), upstream = process.env.PORTAL_UPSTREAM || 'http://127.0.0.1:3425/v1', bootstrapPassword = process.env.PORTAL_ADMIN_PASSWORD } = {}) {
+export async function createPortal({
+  dataDir = process.env.PORTAL_DATA || join(root, 'data'),
+  upstream = process.env.PORTAL_UPSTREAM || 'http://127.0.0.1:3425/v1',
+  bootstrapPassword = process.env.PORTAL_ADMIN_PASSWORD,
+  accountBaseURL = process.env.PORTAL_ACCOUNT_API || 'http://127.0.0.1:57890',
+  accountToken = process.env.PORTAL_ACCOUNT_TOKEN || ''
+} = {}) {
   mkdirSync(dataDir, { recursive: true, mode: 0o700 });
   const db = new DatabaseSync(join(dataDir, 'portal.sqlite'));
   db.exec(`PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;
@@ -77,10 +83,53 @@ export async function createPortal({ dataDir = process.env.PORTAL_DATA || join(r
   const concurrency = new Map();
   const logins = new Map();
   let poolSaving = Promise.resolve();
-  async function accountAPI(path, input) {
-    const response = await upstreamFetch((process.env.PORTAL_ACCOUNT_API || 'http://127.0.0.1:57890') + '/api/' + path, { method: input === undefined ? 'GET' : 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + (process.env.PORTAL_ACCOUNT_TOKEN || '') }, body: input === undefined ? undefined : JSON.stringify(input), signal: AbortSignal.timeout(30000) });
+  let checkinRun = null;
+  async function accountAPI(path, input, timeoutMs = 30000) {
+    let response;
+    try {
+      response = await upstreamFetch(accountBaseURL + '/api/' + path, {
+        method: input === undefined ? 'GET' : 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + accountToken },
+        body: input === undefined ? undefined : JSON.stringify(input),
+        signal: AbortSignal.timeout(timeoutMs)
+      });
+    } catch {
+      fail(502, '账号管理服务暂不可用');
+    }
     if (!response.ok) fail(502, '账号管理服务暂不可用');
     return response.json();
+  }
+  async function checkinState() {
+    const [config, history, pool] = await Promise.all([
+      accountAPI('checkin/config'),
+      accountAPI('checkin/logs'),
+      accountAPI('accounts')
+    ]);
+    const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000;
+    const logs = history.logs.filter(log => Number.isSafeInteger(log?.ts) && log.ts >= cutoff);
+    return {
+      enabled: config.enabled === true,
+      accountCount: pool.accounts.length,
+      logs: logs.slice(-500).reverse().map(({ ts, email, result }) => ({ ts, email, result })),
+      run: checkinRun
+    };
+  }
+  function requestCheckin() {
+    if (checkinRun?.status === 'running') return checkinRun;
+    checkinRun = { status: 'running' };
+    accountAPI('checkin/all', {}, 20 * 60_000).then(result => {
+      if (result.status === 'skipped' && result.reason === 'already_running') {
+        checkinRun = { status: 'busy' };
+        return;
+      }
+      const counts = { success: 0, already: 0, error: 0, unsupported: 0 };
+      for (const account of result.accounts) {
+        const outcome = Object.hasOwn(counts, account.result) ? account.result : 'error';
+        counts[outcome]++;
+      }
+      checkinRun = { status: 'done', counts };
+    }).catch(() => { checkinRun = { status: 'unavailable' }; });
+    return checkinRun;
   }
   async function connectPool(edition) {
     const task = async () => {
@@ -331,6 +380,14 @@ export async function createPortal({ dataDir = process.env.PORTAL_DATA || join(r
       }
       if (path === '/api/admin/state') return json(res, 200, { users: query('SELECT id,email,role,balance,disabled FROM users'), channels: query('SELECT id,name,url,enabled FROM channels'), models: query('SELECT * FROM models'), uncertain: query("SELECT id,user_id,model,reserved,created FROM requests WHERE status='uncertain'") });
       if (path === '/api/admin/accounts') return json(res, 200, await accountAPI('accounts'));
+      if (path === '/api/admin/checkin' && req.method === 'GET') return json(res, 200, await checkinState());
+      if (path === '/api/admin/checkin' && req.method === 'POST') {
+        if (typeof input?.enabled !== 'boolean') fail(400, '请选择开启或关闭自动签到');
+        const config = await accountAPI('checkin/config');
+        const saved = await accountAPI('checkin/config', { config: { ...config, enabled: input.enabled } });
+        return json(res, 200, { enabled: saved.enabled === true });
+      }
+      if (path === '/api/admin/checkin/run' && req.method === 'POST') return json(res, 202, requestCheckin());
       if (path === '/api/admin/oauth/start' && req.method === 'POST') {
         const edition = input.edition === 'international' ? 'international' : 'domestic';
         const result = await accountAPI('oauth/start', { edition });
