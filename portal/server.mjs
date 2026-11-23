@@ -260,12 +260,16 @@ export async function createPortal({ dataDir = process.env.PORTAL_DATA || join(r
     try {
       const url = new URL(req.url, 'http://' + req.headers.host);
       const path = url.pathname;
-      if (req.method === 'GET' && ['/','/admin','/app.js','/style.css'].includes(path)) {
-        const file = path.endsWith('.js') ? 'app.js' : path.endsWith('.css') ? 'style.css' : 'index.html';
-        res.setHeader('Content-Type', file.endsWith('.js') ? 'text/javascript' : file.endsWith('.css') ? 'text/css' : 'text/html; charset=utf-8');
-        res.end(readFileSync(join(root, 'public', file))); return;
+      const pagePaths = ['/','/admin','/login','/register','/dashboard','/profile','/models','/token','/log','/topup','/settings','/chat','/docs'];
+      const assets = {'/app.js':'app.js','/style.css':'style.css','/theme.css':'theme.css','/hero.webp':'hero.webp'};
+      if ((req.method === 'GET' || req.method === 'HEAD') && (pagePaths.includes(path) || assets[path])) {
+        const file = assets[path] || 'index.html';
+        res.setHeader('Content-Type', file.endsWith('.js') ? 'text/javascript' : file.endsWith('.css') ? 'text/css' : file.endsWith('.webp') ? 'image/webp' : 'text/html; charset=utf-8');
+        res.setHeader('Cache-Control', 'no-cache');
+        res.end(req.method === 'HEAD' ? undefined : readFileSync(join(root, 'public', file))); return;
       }
       if (path === '/healthz') return json(res, 200, { ok: true });
+      if (path === '/api/public/models' && req.method === 'GET') return json(res, 200, { data: query('SELECT m.id,m.input_rate,m.output_rate,m.request_fee,m.cache_ttl,m.cache_percent FROM models m JOIN channels c ON c.id=m.channel_id WHERE m.enabled=1 AND c.enabled=1').map(m => ({...m, request_fee:m.request_fee/1000})) });
       if (req.headers['content-length'] && Number(req.headers['content-length']) > 1024 * 1024) fail(413, '请求最大为 1 MB');
       if (req.method !== 'GET' && req.headers.origin && req.headers.origin !== 'http://' + req.headers.host && req.headers.origin !== 'https://' + req.headers.host) fail(403, '跨站请求被拒绝');
       if (req.method === 'POST' && ['/api/login','/api/register'].includes(path)) {

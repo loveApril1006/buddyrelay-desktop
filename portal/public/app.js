@@ -32,28 +32,53 @@ async function action(button, fn) {
 async function balance() {
   me = await api('/api/me');
   $('#balance').textContent = me.balance.toLocaleString('zh-CN', { maximumFractionDigits: 3 });
+  $('#walletBalance').textContent = me.balance.toLocaleString('zh-CN', { maximumFractionDigits: 3 });
+  $('#rechargeEmail').value = me.email;
 }
 async function boot() {
-  try {
-    await balance();
-    $('#auth').hidden = true;
-    $('#workspace').hidden = false;
+  try { await balance(); } catch { me = null; }
+  const route = location.pathname.replace(siteBase, '') || '/';
+  $('#auth').hidden = true;
+  $('#workspace').hidden = true;
+  $('#landing').hidden = true;
+  document.body.classList.toggle('signed-in', !!me);
+  if (route === '/') {
+    $('#landing').hidden = false;
+    document.body.classList.add('landing-page');
+    const result = await api('/api/public/models');
+    $('#publicModels').innerHTML = result.data.length ? result.data.slice(0,3).map(modelCard).join('') : '<div class="catalog-empty"><h3>模型即将开放</h3><p>管理员正在配置模型与价格，开放后会在这里实时展示。</p><a class="text-button" href="/models">前往模型广场</a></div>';
+    $('#homeCode').textContent = codeExample('python');
+    return;
+  }
+  document.body.classList.remove('landing-page');
+  if (me) {
+    if (route === '/login' || route === '/register') return location.replace('/dashboard');
     $('#userEmail').textContent = me.email;
     $('#adminNav').hidden = me.role !== 'admin';
     $('#baseURL').value = location.origin + siteBase + '/v1';
-    await loadModels();
-    await navigate(location.pathname.endsWith('/admin') && me.role === 'admin' ? 'admin' : 'chat');
-  } catch {
+  } else if (!['/models','/docs'].includes(route)) {
     $('#auth').hidden = false;
-    $('#workspace').hidden = true;
+    document.body.classList.add('auth-page');
+    registering = route === '/register';
+    updateAuthText();
+    return;
   }
+  document.body.classList.remove('auth-page');
+  document.body.classList.toggle('public-page', !me);
+  $('#workspace').hidden = false;
+  await loadModels();
+  await navigate(route === '/admin' && me?.role === 'admin' ? 'admin' : routeViews[route] || 'overview', false);
 }
-$('#toggleAuth').onclick = () => {
-  registering = !registering;
+function updateAuthText() {
   $('#authTitle').textContent = registering ? '创建账户' : '登录工作台';
   $('#authSubmit').textContent = registering ? '注册' : '登录';
   $('#toggleAuth').textContent = registering ? '已有账户？登录' : '还没有账户？注册';
   $('#authError').textContent = '';
+}
+$('#toggleAuth').onclick = () => {
+  registering = !registering;
+  window.history.replaceState(null, '', registering ? '/register' : '/login');
+  updateAuthText();
 };
 $('#loginForm').onsubmit = async event => {
   event.preventDefault();
@@ -61,13 +86,19 @@ $('#loginForm').onsubmit = async event => {
   button.disabled = true;
   try {
     await api(registering ? '/api/register' : '/api/login', Object.fromEntries(new FormData(event.target)));
-    await boot();
+    location.assign('/dashboard');
   } catch (error) { $('#authError').textContent = error.message; }
   finally { button.disabled = false; }
 };
 $('#logout').onclick = () => action($('#logout'), async () => { await api('/api/logout', {}); location.reload(); });
-const titles = { chat: '对话工作台', models: '模型与价格', keys: 'API 密钥', usage: '用量与账单', account: '账户设置', admin: '管理后台' };
-async function navigate(view) {
+const titles = { overview:'控制台',chat: 'AI 对话', models: '模型广场', keys: 'API 密钥', usage: '用量日志', topup:'账户充值',docs:'接入文档', account: '账户设置', admin: '管理后台' };
+const routes = {overview:'/dashboard',chat:'/chat',models:'/models',keys:'/token',usage:'/log',topup:'/topup',account:'/profile',docs:'/docs',admin:'/admin'};
+const routeViews = Object.fromEntries(Object.entries(routes).map(([key,value])=>[value,key]));
+routeViews['/settings'] = 'account';
+async function navigate(view, updateURL = true) {
+  if (!me && !['models','docs'].includes(view)) return location.assign('/login');
+  if (updateURL) window.history.pushState(null, '', siteBase + routes[view]);
+  document.body.classList.toggle('public-page', !me);
   for (const section of document.querySelectorAll('.view')) section.hidden = section.id !== 'view-' + view;
   for (const button of document.querySelectorAll('#nav button')) button.classList.toggle('active', button.dataset.view === view);
   $('#pageTitle').textContent = titles[view];
@@ -75,6 +106,16 @@ async function navigate(view) {
   if (view === 'keys') await loadKeys();
   if (view === 'usage') await loadUsage();
   if (view === 'models') await loadModels();
+  if (view === 'overview') await loadOverview();
+  if (view === 'topup') await balance();
+  if (view === 'docs') { $('#docsBase').value = location.origin + siteBase + '/v1'; $('#docsCode').textContent = codeExample('python'); }
+  if (view === 'account') {
+    $('#profileEmail').textContent = me.email;
+    $('#profileAvatar').textContent = me.email[0].toUpperCase();
+    $('#profileRole').textContent = me.role === 'admin' ? '管理员账户' : '用户账户';
+    $('#profileBalance').textContent = me.balance.toLocaleString('zh-CN') + ' 积分';
+  }
+  for (const a of document.querySelectorAll('[data-top]')) a.classList.toggle('active',a.dataset.top === view);
   if (view === 'admin') { adminState = await api('/api/admin/state'); renderAdmin(); }
 }
 $('#nav').onclick = event => {
@@ -82,13 +123,39 @@ $('#nav').onclick = event => {
   if (button) action(button, () => navigate(button.dataset.view));
 };
 async function loadModels() {
-  models = (await api('/api/models')).data;
+  models = (await api(me ? '/api/models' : '/api/public/models')).data;
   const selected = $('#chatModel').value;
   $('#chatModel').innerHTML = models.length ? models.map(m => `<option value="${escape(m.id)}">${escape(m.id)}</option>`).join('') : '<option value="">管理员尚未开放模型</option>';
   if (models.some(m => m.id === selected)) $('#chatModel').value = selected;
-  $('#modelCards').innerHTML = models.length ? models.map(m => `<article class="card model-card"><h3>${escape(m.id)}</h3><div class="prices"><div><span class="muted">输入 / 千 Token</span><strong>${m.input_rate}</strong></div><div><span class="muted">输出 / 千 Token</span><strong>${m.output_rate}</strong></div></div><p class="muted">按次 ${m.request_fee} 积分 · ${m.cache_ttl ? '缓存 ' + m.cache_ttl + ' 秒，命中收取按次费用的 ' + m.cache_percent + '%' : '未启用回答缓存'}</p><button class="secondary" data-copy-model="${escape(m.id)}">复制模型 ID</button></article>`).join('') : '<div class="card empty-small">模型尚未开放，请联系管理员配置上游和价格。</div>';
+  $('#modelCards').innerHTML = models.length ? models.map(modelCard).join('') : '<div class="card catalog-empty"><div class="empty-icon">◇</div><h3>模型正在准备中</h3><p>管理员尚未开放模型。模型与价格就绪后将在这里显示。</p></div>';
   $('#send').disabled = !models.length;
   priceHint();
+}
+function modelCard(m) {
+  return `<article class="card model-card"><div class="model-kind">CHAT COMPLETIONS</div><h3>${escape(m.id)}</h3><div class="prices"><div><span class="muted">输入 / 千 Token</span><strong>${m.input_rate}<small>积分</small></strong></div><div><span class="muted">输出 / 千 Token</span><strong>${m.output_rate}<small>积分</small></strong></div></div><p class="muted">按次 ${m.request_fee} 积分 · ${m.cache_ttl ? '缓存 ' + m.cache_ttl + ' 秒，命中收取按次费用的 ' + m.cache_percent + '%' : '未启用回答缓存'}</p><button class="secondary" data-copy-model="${escape(m.id)}">复制模型 ID</button></article>`;
+}
+async function loadOverview() {
+  const result = await api('/api/usage');
+  const requests = result.requests;
+  const spent = requests.reduce((sum,r)=>sum+r.cost,0);
+  const tokens = requests.reduce((sum,r)=>sum+r.input_tokens+r.output_tokens,0);
+  const hits = requests.filter(r=>r.cache_hit).length;
+  $('#welcomeName').textContent = '欢迎回来，' + me.email.split('@')[0];
+  $('#overviewStats').innerHTML = [['账户余额',me.balance.toLocaleString('zh-CN'),'积分'],['累计消耗',points(spent),'积分 · 最近 100 条'],['调用次数',requests.length.toLocaleString('zh-CN'),'次 · 最近 100 条'],['Token 用量',tokens.toLocaleString('zh-CN'),'Token · 缓存命中 ' + hits + ' 次']].map(([label,value,note])=>`<article class="stat-card"><span>${label}</span><strong>${value}</strong><small>${note}</small></article>`).join('');
+  const days = Array.from({length:7},(_,i)=>{const day=new Date();day.setHours(0,0,0,0);day.setDate(day.getDate()-6+i);return {day,count:requests.filter(r=>r.created>=day.getTime()&&r.created<day.getTime()+86400000).length};});
+  const max = Math.max(1,...days.map(d=>d.count));
+  $('#usageChart').innerHTML = days.map(d=>`<div class="chart-column"><span>${d.count || ''}</span><div class="chart-track"><div class="chart-bar" data-height="${Math.max(d.count?4:0,d.count/max*100)}"></div></div><small>${d.day.getMonth()+1}/${d.day.getDate()}</small></div>`).join('');
+  for (const bar of document.querySelectorAll('.chart-bar')) bar.style.height = bar.dataset.height + '%';
+  // A zero-data chart keeps its baseline without fabricated traffic.
+  if (!requests.length) $('#usageChart').insertAdjacentHTML('afterbegin','<p class="chart-empty">完成第一次调用后，在这里查看用量趋势</p>');
+  $('#recentRequests').innerHTML = '<table><thead><tr><th>调用时间</th><th>模型</th><th>Token 用量</th><th>消耗积分</th><th>状态</th></tr></thead><tbody>' + (requests.slice(0,5).map(r=>`<tr><td>${date(r.created)}</td><td>${escape(r.model)}</td><td>${r.input_tokens+r.output_tokens}</td><td>${points(r.cost)}</td><td>${states[r.status] || escape(r.status)}</td></tr>`).join('') || '<tr><td colspan="5" class="empty-small">暂无调用记录，前往模型广场选择模型即可开始。</td></tr>') + '</tbody></table>';
+}
+function codeExample(language) {
+  const base = location.origin + siteBase + '/v1';
+  const model = models[0]?.id || 'YOUR_MODEL_ID';
+  if (language === 'node') return `import OpenAI from "openai";\n\nconst client = new OpenAI({\n  baseURL: "${base}",\n  apiKey: "YOUR_API_KEY",\n});\n\nconst result = await client.chat.completions.create({\n  model: "${model}",\n  messages: [{ role: "user", content: "你好" }],\n});\nconsole.log(result.choices[0].message.content);`;
+  if (language === 'curl') return `curl ${base}/chat/completions \\\n  -H "Authorization: Bearer YOUR_API_KEY" \\\n  -H "Content-Type: application/json" \\\n  -d '{"model":"${model}","messages":[{"role":"user","content":"你好"}]}'`;
+  return `from openai import OpenAI\n\nclient = OpenAI(\n    base_url="${base}",\n    api_key="YOUR_API_KEY"\n)\n\nresponse = client.chat.completions.create(\n    model="${model}",\n    messages=[{"role": "user", "content": "你好"}]\n)\n\nprint(response.choices[0].message.content)`;
 }
 $('#modelCards').onclick = event => {
   const button = event.target.closest('[data-copy-model]');
@@ -249,4 +316,28 @@ $('#adminContent').onchange = async event => {
     $('#importForm').elements.accounts.value = await file.text();
   }
 };
+document.addEventListener('click', event => {
+  const go = event.target.closest('[data-go]');
+  if (go) action(go, () => navigate(go.dataset.go));
+});
+$('#publicModels').onclick = async event => {
+  const b = event.target.closest('[data-copy-model]');
+  if (b) action(b, async () => { await navigator.clipboard.writeText(b.dataset.copyModel); b.textContent = '已复制'; });
+};
+$('#copyRechargeEmail').onclick = () => action($('#copyRechargeEmail'), async () => { await navigator.clipboard.writeText(me.email); notice('账户邮箱已复制'); });
+$('#copyHomeCode').onclick = () => action($('#copyHomeCode'), async () => { await navigator.clipboard.writeText($('#homeCode').textContent); $('#copyHomeCode').textContent = '已复制'; });
+$('#copyDocsCode').onclick = () => action($('#copyDocsCode'), async () => { await navigator.clipboard.writeText($('#docsCode').textContent); notice('接入代码已复制'); });
+$('.doc-tabs').onclick = event => {
+  const b = event.target.closest('[data-code]');
+  if (!b) return;
+  for (const item of document.querySelectorAll('[data-code]')) item.classList.toggle('active', item === b);
+  $('#docsCode').textContent = codeExample(b.dataset.code);
+};
+$('#mobileNav').onclick = () => { $('#siteHeader').classList.toggle('expanded'); $('#mobileNav').setAttribute('aria-expanded',String($('#siteHeader').classList.contains('expanded'))); };
+$('#themeToggle').onclick = () => {
+  document.documentElement.classList.toggle('dark');
+  try { localStorage.setItem('buddyrelay-theme',document.documentElement.classList.contains('dark')?'dark':'light'); } catch {}
+};
+try { document.documentElement.classList.toggle('dark',localStorage.getItem('buddyrelay-theme')==='dark'); } catch {}
+window.addEventListener('popstate',()=>{ const view = routeViews[location.pathname]; if (view && !$('#workspace').hidden) navigate(view,false); else location.reload(); });
 await boot();
