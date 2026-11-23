@@ -11,6 +11,7 @@ let models = [];
 let history = [];
 let adminState;
 let adminTab = 'users';
+let loginTimer;
 
 async function api(path, body) {
   const res = await fetch(path, { method: body === undefined ? 'GET' : 'POST', headers: { 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });
@@ -186,11 +187,48 @@ function renderAdmin() {
   if (adminTab === 'models') area.innerHTML = `<div class="card"><div class="list-row"><h2>模型定价</h2><button id="syncModels" class="primary">同步上游模型</button></div><p class="muted">输入与输出价格为积分 / 千 Token。新同步的模型需要设置价格并启用。缓存命中只收按次费用 × 缓存收费比例。</p><div class="table-scroll"><table><thead><tr><th>模型</th><th>输入价格</th><th>输出价格</th><th>按次积分</th><th>缓存秒数</th><th>缓存收费 %</th><th>开放</th><th></th></tr></thead><tbody>${adminState.models.map(m => `<tr data-model-row="${escape(m.id)}"><td>${escape(m.id)}</td>${['input_rate','output_rate','request_fee','cache_ttl','cache_percent'].map(k => `<td><input class="price-edit small" name="${k}" type="number" min="0" step="${k === 'request_fee' ? '.001' : '1'}" value="${k === 'request_fee' ? m[k] / 1000 : m[k]}"></td>`).join('')}<td><input type="checkbox" name="enabled" ${m.enabled ? 'checked' : ''}></td><td><button class="secondary" data-save-model="${escape(m.id)}">保存</button></td></tr>`).join('')}</tbody></table></div></div>`;
   if (adminTab === 'sources') area.innerHTML = `<div class="card"><h2>上游来源</h2><p class="muted">Magpie 统一入口复用现有 WorkBuddy 账号池。也可接入其他 OpenAI 兼容来源，密钥仅在后台保存。</p>${adminState.channels.map(c => `<div class="list-row"><div>${escape(c.name)}<small>${escape(c.url)} · ${c.enabled ? '已启用' : '已停用'}</small></div><button class="secondary" data-edit-channel="${escape(c.id)}">编辑</button></div>`).join('')}<form id="channelForm" class="admin-form"><input name="id" type="hidden"><label>来源名称<input name="name" required></label><label>OpenAI Base URL<input name="url" type="url" placeholder="http://127.0.0.1:7863/v1" required></label><label>API Key<input name="key" type="password" autocomplete="off" placeholder="留空保留原密钥"></label><label class="check"><input name="enabled" type="checkbox" checked>启用</label><button class="primary">保存来源</button></form></div><form id="importForm" class="card"><h2>批量导入 WorkBuddy 账号</h2><p class="muted">使用 WorkBuddy 导出的账号 JSON 数组，由本机账号管理服务按 UID 合并。导入后在 WorkBuddy 管理中启用对应版本反代，并从 Magpie 接入该反代。</p><label>账号文件<input id="accountsFile" type="file" accept=".json,application/json"></label><label>账号 JSON<textarea name="accounts" class="accounts" placeholder='[{"uid":"...","access_token":"..."}]' required></textarea></label><button class="primary">导入账号</button></form>`;
   if (adminTab === 'ops') area.innerHTML = `<div class="card"><h2>回答缓存</h2><p class="muted">缓存按用户隔离，受每个模型的有效期控制。仅缓存用户主动开启、temperature 为 0 的非流式文本请求。</p><button id="clearCache" class="secondary">清空回答缓存</button></div><div class="card"><h2>中断调用核对</h2><p class="muted">流式输出中断或服务意外退出的请求保留预扣积分，核对后输入最终收费。重复提交不会重复退款。</p>${adminState.uncertain.length ? adminState.uncertain.map(r => `<div class="list-row"><div>${escape(adminState.users.find(u => u.id === r.user_id)?.email)}<small>${escape(r.model)} · 预扣 ${points(r.reserved)} 积分 · ${date(r.created)}</small></div><input class="price-edit" type="number" min="0" step=".001" value="0" data-reconcile-input="${escape(r.id)}"><button class="secondary" data-reconcile="${escape(r.id)}">核对结算</button></div>`).join('') : '<p class="empty-small">当前没有待核对记录</p>'}</div>`;
+  if (adminTab === 'sources') {
+    area.insertAdjacentHTML('afterbegin', `<div class="card"><h2>WorkBuddy 账号池</h2><p class="muted">在官方页面逐个登录授权。完成后自动保存账号、开启对应版本的本机反代并同步模型，新模型可在定价页开放。</p><div class="inline-form"><button class="primary" data-oauth="domestic">添加国内账号</button><button class="secondary" data-oauth="international">添加国际账号</button><button class="text-button" id="refreshAccounts">刷新账号</button></div><div id="oauthProgress" role="status"></div><div id="accountList" class="muted">正在读取账号池…</div><div class="inline-form"><button class="secondary" data-connect-pool="domestic">接入已有国内账号池</button><button class="secondary" data-connect-pool="international">接入已有国际账号池</button></div></div>`);
+    loadAccounts();
+  }
+}
+async function loadAccounts() {
+  try {
+    const result = await api('/api/admin/accounts');
+    const box = $('#accountList');
+    if (!box) return;
+    box.innerHTML = result.accounts.length ? result.accounts.map(a => `<div class="list-row"><div>${escape(a.nickname || a.email || a.uid || a.id)}<small>${a.edition === 'international' ? '国际版' : '国内版'} · ${a.needs_relogin ? '需要重新登录' : '已加入账号库'}</small></div></div>`).join('') : '尚无账号，请添加授权登录。';
+  } catch { if ($('#accountList')) $('#accountList').textContent = '账号管理服务未连接，请确认后台服务正在运行。'; }
+}
+async function startOAuth(edition) {
+  clearTimeout(loginTimer);
+  const result = await api('/api/admin/oauth/start', { edition });
+  const link = new URL(result.verificationUri);
+  if (link.protocol !== 'https:' || !['www.codebuddy.cn','www.workbuddy.ai','codebuddy.cn','workbuddy.ai'].includes(link.hostname)) throw new Error('授权地址异常，请使用原 WorkBuddy 管理页面登录');
+  $('#oauthProgress').innerHTML = `<p>请打开官方页面完成登录。<a class="text-button" href="${escape(link.href)}" target="_blank" rel="noopener noreferrer">打开官方授权页面</a></p>`;
+  const deadline = Date.now() + Math.min(Number(result.expiresIn) || 600, 600) * 1000;
+  async function poll() {
+    try {
+      if (Date.now() > deadline) throw new Error('授权已超时，请重新添加账号');
+      const state = await api('/api/admin/oauth/status', { loginId: result.loginId });
+      if (state.done) {
+        if (state.error) throw new Error(state.error);
+        notice('账号授权成功，已自动加入反代池并同步模型');
+        await refreshAdmin();
+        return;
+      }
+      loginTimer = setTimeout(poll, 3000);
+    } catch (error) { notice(error.message, true); }
+  }
+  loginTimer = setTimeout(poll, 3000);
 }
 async function refreshAdmin() { adminState = await api('/api/admin/state'); renderAdmin(); await balance(); }
 $('#adminContent').onclick = event => {
   const b = event.target.closest('button');
   if (!b) return;
+  if (b.dataset.oauth) action(b, () => startOAuth(b.dataset.oauth));
+  if (b.id === 'refreshAccounts') action(b, loadAccounts);
+  if (b.dataset.connectPool) action(b, async () => { await api('/api/admin/accounts/connect', { edition: b.dataset.connectPool }); await refreshAdmin(); notice('已有账号池已接入'); });
   if (b.id === 'syncModels') action(b, async () => { const result = await api('/api/admin/sync', {}); await refreshAdmin(); notice(`同步完成，共发现 ${result.count} 个模型。` + result.errors.join('，'), !!result.errors.length); });
   if (b.dataset.credit) action(b, async () => { const node = [...document.querySelectorAll('[data-credit-input]')].find(n => n.dataset.creditInput === b.dataset.credit); await api('/api/admin/credit', { id: b.dataset.credit, points: Number(node.value), operation: b.dataset.operation ||= crypto.randomUUID() }); await refreshAdmin(); notice('积分已调整'); });
   if (b.dataset.disable) action(b, async () => { await api('/api/admin/user', { id: b.dataset.disable, disabled: b.dataset.value === '1' }); await refreshAdmin(); });
