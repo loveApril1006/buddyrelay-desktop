@@ -1,17 +1,146 @@
 <!doctype html>
 <html lang="zh-CN">
-<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>BuddyRelay · 模型中转站</title><link rel="stylesheet" href="./style.css?v=20261123-2"><link rel="stylesheet" href="./theme.css?v=20261123-2"><script type="module" src="./app.js?v=20261123-2"></script></head>
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>BuddyRelay · 模型中转站</title><link rel="stylesheet" href="./style.css?v=20261123-2"><link rel="stylesheet" href="./theme.css?v=20261123-3"><script type="module" src="./app.js?v=20261123-3"></script></head>
 <body>
 <header id="siteHeader" class="site-header"><a href="/" class="site-brand"><span class="brand-mark">B</span><span>BuddyRelay<small>AI API Gateway</small></span></a><nav aria-label="网站导航"><a href="/" data-top="home">首页</a><a href="/dashboard" data-top="overview">控制台</a><a href="/models" data-top="models">模型广场</a><a href="/chat" data-top="chat">AI 对话</a><a href="/docs" data-top="docs">接入文档</a></nav><div class="site-actions"><button id="themeToggle" class="icon-control" aria-label="切换深色模式">◐</button><a class="login-link" href="/login">登录</a><a class="primary site-cta" href="/dashboard">进入控制台</a><button id="mobileNav" class="icon-control" aria-label="展开导航">☰</button></div></header>
-<section id="landing" hidden>
-  <div class="home-hero"><div class="hero-copy"><div class="hero-kicker">AI 模型接入，为每一次创造</div><h1>一个接口，<br>连接你的 <span>AI 工作流。</span></h1><p>从日常对话到开发工具，把需要的模型接到一起。<br>清晰的价格、独立的密钥，每次调用都有据可查。</p><div class="hero-actions"><a class="primary" href="/register">立即开始使用</a><a class="secondary" href="/models">浏览模型广场</a></div><div class="hero-features"><span>OpenAI 兼容接口</span><span>流式响应</span><span>按量积分计费</span></div></div><div class="hero-art"><img src="/hero.webp" alt="BuddyRelay 机器人在笔记本电脑前连接 AI 工作流" width="960" height="720" fetchpriority="high"></div></div>
-  <div class="compat-band"><span>接入你熟悉的工具</span><strong>Cherry Studio</strong><strong>Open WebUI</strong><strong>OpenAI SDK</strong><strong>自定义应用</strong></div>
-  <section class="home-section"><div class="section-top"><div><span class="eyebrow">BUILD WITH BUDDYRELAY</span><h2>从选择模型，到开始创造。</h2></div><p>把接入过程交给平台，<br>让注意力回到你的想法。</p></div><div class="feature-grid"><article><div class="feature-icon">⌘</div><h3>一个入口，多种选择</h3><p>在模型广场查看已开放的模型和价格，使用同一套接口连接你的应用。</p></article><article><div class="feature-icon">◷</div><h3>每次调用，清晰可查</h3><p>输入、输出 Token 与实际扣分一并记录，随时查看账户余额和积分流水。</p></article><article><div class="feature-icon">▤</div><h3>密钥和缓存，由你掌控</h3><p>为不同工具创建独立密钥，按需开启回答缓存，随时撤销不再使用的密钥。</p></article></div></section>
-  <section class="home-section model-section"><div class="section-top"><div><span class="eyebrow">MODEL EXPLORER</span><h2>找到适合任务的模型。</h2></div><a href="/models" class="text-button">查看全部模型</a></div><div id="publicModels" class="model-grid"></div></section>
-  <section class="home-section quickstart"><div><span class="eyebrow">QUICK START</span><h2>几行代码，<br>接上你的下一个想法。</h2><p>使用熟悉的 OpenAI SDK，填入本站地址、<br>你的 API Key 和已开放的模型 ID。</p><a href="/docs" class="primary">查看接入文档</a></div><div class="code-card"><div class="code-header"><span>Python · OpenAI SDK</span><button id="copyHomeCode">复制代码</button></div><pre id="homeCode"></pre></div></section>
-  <section class="home-section faq"><div><span class="eyebrow">QUESTIONS & ANSWERS</span><h2>开始之前，<br>你可能想了解。</h2></div><div><details><summary>如何开始使用？</summary><p>注册并登录后，联系管理员充值积分，在模型广场选择模型即可开始对话。也可以创建 API Key 接入自己的工具。</p></details><details><summary>积分如何扣除？</summary><p>按模型定价计费，调用前预扣预计上限，完成后按上游返回的用量结算。上游未返回有效用量时按预扣上限计费，详情可在控制台查看。</p></details><details><summary>缓存命中如何收费？</summary><p>各模型单独配置有效期和命中收费比例。在非流式、随机程度为 0 的文本请求中主动开启缓存后，重复请求可能命中缓存。</p></details><details><summary>可以使用哪些客户端？</summary><p>支持配置 OpenAI 兼容地址的客户端可接入本站 Chat Completions 接口。具体模型以模型广场已开放列表为准。</p></details></div></section>
-  <section class="home-callout"><h2>让你的下一个想法，开始运行。</h2><p>创建账户，把模型接进你的工作流。</p><a class="primary" href="/register">创建账户</a></section><footer class="site-footer"><a href="/" class="site-brand"><span class="brand-mark">B</span><span>BuddyRelay<small>AI API Gateway</small></span></a><p>模型接入 · 对话 · API</p><div><a href="/models">模型广场</a><a href="/docs">接入文档</a><a href="/dashboard">控制台</a></div><small>© 2026 BuddyRelay</small></footer>
-</section>
+<div id="landing" hidden>
+  <main class="home-content">
+    <section class="home-hero" aria-labelledby="home-title">
+      <div class="hero-copy">
+        <p class="hero-kicker">BuddyRelay 模型网关</p>
+        <h1 id="home-title">用一个 API<br>接入 <span>AI 模型</span></h1>
+        <p>在网页试用模型，或使用自己的 API 密钥接入开发工具。每个模型的积分价格公开，调用记录随时可查。</p>
+        <div class="hero-actions">
+          <a class="primary" href="/register">创建账户</a>
+          <a class="secondary" href="#pricing">查看模型与价格</a>
+        </div>
+      </div>
+      <div class="hero-art">
+        <img src="/hero.webp" alt="BuddyRelay 机器人在笔记本电脑前工作" width="960" height="720" fetchpriority="high">
+      </div>
+    </section>
+
+    <nav class="home-links" aria-label="首页目录">
+      <a href="#status">网关状态</a>
+      <a href="#services">使用方式</a>
+      <a href="#pricing">模型价格</a>
+      <a href="#quickstart">接入示例</a>
+      <a href="#faq">常见问题</a>
+    </nav>
+
+    <section id="status" class="home-section gateway-status" aria-labelledby="status-title">
+      <div class="gateway-heading">
+        <div>
+          <h2 id="status-title">网关状态</h2>
+          <p>检查网关接口和模型目录的当前状态。</p>
+        </div>
+        <button id="refreshHomeStatus" type="button">重新检查</button>
+      </div>
+      <dl class="gateway-metrics" aria-live="polite">
+        <div><dt>网关接口</dt><dd id="homeGateway">检查中</dd></div>
+        <div><dt>已开放模型</dt><dd id="homeModelCount">—</dd></div>
+        <div><dt>配置回答缓存的模型</dt><dd id="homeCacheCount">—</dd></div>
+      </dl>
+      <p class="gateway-note">检查范围为本站接口和目录。<span id="homeLastCheck"></span></p>
+    </section>
+
+    <section id="services" class="home-section home-services" aria-labelledby="services-title">
+      <div class="section-top">
+        <div><h2 id="services-title">在网页对话，或接入你的工具</h2><p>两种方式共用账户积分和调用记录。</p></div>
+      </div>
+      <div class="feature-grid">
+        <article>
+          <h3>网页对话</h3>
+          <p>选择已开放的模型，设置输出上限与随机程度，按需使用流式回答。</p>
+          <a href="/chat">打开 AI 对话 <span aria-hidden="true">↗</span></a>
+        </article>
+        <article>
+          <h3>OpenAI 兼容接口</h3>
+          <p>通过 Chat Completions 接入 OpenAI SDK、自定义应用或支持兼容地址的客户端。</p>
+          <a href="/token">管理 API 密钥 <span aria-hidden="true">↗</span></a>
+        </article>
+        <article>
+          <h3>用量与账户积分</h3>
+          <p>查看每次调用的输入、输出、缓存命中和扣分，也可以查询积分到账记录。</p>
+          <a href="/log">查看用量日志 <span aria-hidden="true">↗</span></a>
+        </article>
+      </div>
+    </section>
+
+    <section id="pricing" class="home-section home-pricing" aria-labelledby="pricing-title">
+      <div class="section-top">
+        <div><h2 id="pricing-title">模型与积分价格</h2><p>按所选模型的输入、输出和请求次数结算。</p></div>
+        <a href="/models" class="secondary">模型广场</a>
+      </div>
+      <p id="homePricingMessage" class="home-pricing-message" role="status">正在获取已开放的模型。</p>
+      <div id="homePricing" class="home-pricing-table table-scroll" role="region" aria-label="模型价格对比" tabindex="0" hidden>
+        <table>
+          <thead><tr><th scope="col">模型 ID</th><th scope="col">输入 · 积分 / 千 Token</th><th scope="col">输出 · 积分 / 千 Token</th><th scope="col">积分 / 次</th><th scope="col">回答缓存</th></tr></thead>
+          <tbody id="homePricingRows"></tbody>
+        </table>
+      </div>
+      <dl class="price-guide">
+        <div><dt>输入和输出</dt><dd>根据上游报告的输入与输出 Token 分别计费。</dd></div>
+        <div><dt>按次费用</dt><dd>模型设置的固定费用，与 Token 费用合计。</dd></div>
+        <div><dt>缓存命中</dt><dd>按该模型的按次费用和缓存收费比例计算。</dd></div>
+      </dl>
+    </section>
+
+    <section id="quickstart" class="home-section quickstart" aria-labelledby="quickstart-title">
+      <div>
+        <h2 id="quickstart-title">发起第一次调用</h2>
+        <ol>
+          <li>注册账户并联系管理员充值积分。</li>
+          <li>创建 API 密钥，在模型广场复制模型 ID。</li>
+          <li>替换示例里的密钥和模型 ID，再运行代码。</li>
+        </ol>
+        <a href="/docs" class="secondary">打开接入文档</a>
+      </div>
+      <div class="code-card">
+        <div class="code-header">
+          <div class="home-code-options" role="group" aria-label="接入示例语言">
+            <button type="button" data-home-code="python" aria-pressed="true">Python</button>
+            <button type="button" data-home-code="node" aria-pressed="false">Node.js</button>
+            <button type="button" data-home-code="curl" aria-pressed="false">cURL</button>
+          </div>
+          <button type="button" id="copyHomeCode" aria-live="polite">复制代码</button>
+        </div>
+        <pre id="homeCode" tabindex="0" aria-label="API 接入代码"></pre>
+      </div>
+    </section>
+
+    <section id="faq" class="home-section faq" aria-labelledby="faq-title">
+      <div><h2 id="faq-title">常见问题</h2><a class="text-button" href="/docs">查看接口文档</a></div>
+      <div>
+        <details><summary>如何开始使用？</summary><p>注册并登录后联系管理员充值，在模型广场选择已开放的模型。网页对话可直接使用账户，外部客户端需要创建 API 密钥。</p></details>
+        <details><summary>外部客户端要填哪些参数？</summary><p>选择 OpenAI 兼容接口，填写接入文档中的基础地址、账户 API 密钥和模型广场中的准确模型 ID。</p></details>
+        <details><summary>积分什么时候扣除？</summary><p>网关会在发起请求前暂扣预计上限，并按上游返回的用量结算。上游未返回有效用量时按暂扣上限计费，详情可在用量日志查看。</p></details>
+        <details><summary>哪些请求可以命中回答缓存？</summary><p>模型已配置缓存时，主动启用缓存的非流式请求需要将随机程度设为 0，并且不附带工具定义。同一账户在有效期内发送相同请求才可能命中。</p></details>
+        <details><summary>怎样确认模型能完成我的任务？</summary><p>先用实际任务做少量试用。对照所需的参数和输入长度，检查结果和用量日志，再决定是否接入业务。</p></details>
+        <details><summary>怎么充值和查看余额？</summary><p>在控制台打开账户充值页，复制你的账户邮箱并联系管理员。到账后可在积分流水中查询。</p></details>
+      </div>
+    </section>
+
+    <section class="home-callout">
+      <h2>把模型接入你的应用</h2>
+      <p>注册后即可创建独立的 API 密钥。</p>
+      <a class="primary" href="/register">创建账户</a>
+      <a class="secondary" href="/dashboard">进入控制台</a>
+    </section>
+  </main>
+
+  <footer class="site-footer home-footer">
+    <div class="home-footer-grid">
+      <div class="footer-brand">
+        <a href="/" class="site-brand"><span class="brand-mark">B</span><span>BuddyRelay<small>AI API Gateway</small></span></a>
+        <p>© 2026 BuddyRelay</p>
+      </div>
+      <nav aria-label="产品"><h2>产品</h2><a href="/chat">AI 对话</a><a href="/models">模型广场</a><a href="#pricing">模型价格</a></nav>
+      <nav aria-label="开发者"><h2>开发者</h2><a href="#status">网关状态</a><a href="/docs">接入文档</a><a href="/token">API 密钥</a></nav>
+      <nav aria-label="账户"><h2>账户</h2><a href="/dashboard">控制台</a><a href="/topup">积分充值</a><a href="#faq">常见问题</a></nav>
+    </div>
+  </footer>
+</div>
 <section id="auth" class="auth" hidden>
   <div class="intro"><a class="brand" href="./">BuddyRelay<span>模型中转站</span></a><h1>连接模型，<br>继续你的 AI 工作流。</h1><p>选择模型、开始对话，<br>在一个账户里管理调用与积分。</p><div class="intro-foot">OpenAI 兼容 API · 流式对话 · 用量明细</div></div>
   <div class="sign"><form id="loginForm"><div class="eyebrow">欢迎使用 BuddyRelay</div><h2 id="authTitle">登录工作台</h2><label>邮箱<input name="email" type="email" autocomplete="username" required></label><label>密码<input name="password" type="password" minlength="10" maxlength="256" autocomplete="current-password" required></label><p id="authError" class="error" role="alert"></p><button class="primary" id="authSubmit">登录</button><button type="button" id="toggleAuth" class="text-button">还没有账户？注册</button><p class="muted">新账户初始积分为 0，可联系管理员充值。</p></form></div>

@@ -13,8 +13,8 @@ let adminState;
 let adminTab = 'users';
 let loginTimer;
 
-async function api(path, body) {
-  const res = await fetch(path, { method: body === undefined ? 'GET' : 'POST', headers: { 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });
+async function api(path, body, options) {
+  const res = await fetch(path, { method: body === undefined ? 'GET' : 'POST', headers: { 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body), ...options });
   const data = await res.json();
   if (!res.ok) throw new Error(data.error?.message || '请求失败');
   return data;
@@ -35,21 +35,55 @@ async function balance() {
   $('#walletBalance').textContent = me.balance.toLocaleString('zh-CN', { maximumFractionDigits: 3 });
   $('#rechargeEmail').value = me.email;
 }
+async function refreshHomeStatus() {
+  const refresh = $('#refreshHomeStatus');
+  refresh.disabled = true;
+  const requestOptions = { signal: AbortSignal.timeout(8000), cache: 'no-store' };
+  try {
+    await Promise.all([
+      api('/healthz', undefined, requestOptions).then(result => {
+        $('#homeGateway').textContent = result.ok === true ? '可访问' : '异常';
+        $('#homeGateway').classList.toggle('status-ok', result.ok === true);
+      }).catch(() => {
+        $('#homeGateway').textContent = '无法确认';
+        $('#homeGateway').classList.remove('status-ok');
+      }),
+      api('/api/public/models', undefined, requestOptions).then(({ data }) => {
+        $('#homeModelCount').textContent = data.length;
+        $('#homeCacheCount').textContent = data.filter(model => model.cache_ttl > 0).length;
+        $('#homePricingRows').innerHTML = data.map(model => {
+          const cache = model.cache_ttl > 0 ? `${model.cache_ttl} 秒 · 命中收取按次费用的 ${model.cache_percent}%` : '关闭';
+          return `<tr><th scope="row">${escape(model.id)}</th><td>${model.input_rate}</td><td>${model.output_rate}</td><td>${model.request_fee}</td><td>${cache}</td></tr>`;
+        }).join('');
+        $('#homePricing').hidden = data.length === 0;
+        $('#homePricingMessage').textContent = data.length ? '' : '当前没有开放的模型。管理员启用模型后，价格会显示在这里。';
+      }).catch(() => {
+        $('#homeModelCount').textContent = '—';
+        $('#homeCacheCount').textContent = '—';
+        $('#homePricing').hidden = true;
+        $('#homePricingMessage').textContent = '暂时无法读取模型目录，可在网关状态中重新检查。';
+      })
+    ]);
+    $('#homeLastCheck').textContent = ` 最近检查 ${date(Date.now())}`;
+  } finally {
+    refresh.disabled = false;
+  }
+}
 async function boot() {
-  try { await balance(); } catch { me = null; }
   const route = location.pathname.replace(siteBase, '') || '/';
   $('#auth').hidden = true;
   $('#workspace').hidden = true;
   $('#landing').hidden = true;
-  document.body.classList.toggle('signed-in', !!me);
   if (route === '/') {
     $('#landing').hidden = false;
     document.body.classList.add('landing-page');
-    const result = await api('/api/public/models');
-    $('#publicModels').innerHTML = result.data.length ? result.data.slice(0,3).map(modelCard).join('') : '<div class="catalog-empty"><h3>模型即将开放</h3><p>管理员正在配置模型与价格，开放后会在这里实时展示。</p><a class="text-button" href="/models">前往模型广场</a></div>';
     $('#homeCode').textContent = codeExample('python');
-    return;
+    refreshHomeStatus();
+    if (location.hash) document.getElementById(location.hash.slice(1))?.scrollIntoView();
   }
+  try { await balance(); } catch { me = null; }
+  document.body.classList.toggle('signed-in', !!me);
+  if (route === '/') return;
   document.body.classList.remove('landing-page');
   if (me) {
     if (route === '/login' || route === '/register') return location.replace('/dashboard');
@@ -320,12 +354,25 @@ document.addEventListener('click', event => {
   const go = event.target.closest('[data-go]');
   if (go) action(go, () => navigate(go.dataset.go));
 });
-$('#publicModels').onclick = async event => {
-  const b = event.target.closest('[data-copy-model]');
-  if (b) action(b, async () => { await navigator.clipboard.writeText(b.dataset.copyModel); b.textContent = '已复制'; });
+$('#refreshHomeStatus').onclick = refreshHomeStatus;
+$('.home-code-options').onclick = event => {
+  const selected = event.target.closest('[data-home-code]');
+  if (!selected) return;
+  for (const button of $('.home-code-options').querySelectorAll('button')) {
+    button.setAttribute('aria-pressed', String(button === selected));
+  }
+  $('#homeCode').textContent = codeExample(selected.dataset.homeCode);
+  $('#copyHomeCode').textContent = '复制代码';
 };
 $('#copyRechargeEmail').onclick = () => action($('#copyRechargeEmail'), async () => { await navigator.clipboard.writeText(me.email); notice('账户邮箱已复制'); });
-$('#copyHomeCode').onclick = () => action($('#copyHomeCode'), async () => { await navigator.clipboard.writeText($('#homeCode').textContent); $('#copyHomeCode').textContent = '已复制'; });
+$('#copyHomeCode').onclick = async event => {
+  try {
+    await navigator.clipboard.writeText($('#homeCode').textContent);
+    event.target.textContent = '已复制';
+  } catch {
+    event.target.textContent = '请手动复制';
+  }
+};
 $('#copyDocsCode').onclick = () => action($('#copyDocsCode'), async () => { await navigator.clipboard.writeText($('#docsCode').textContent); notice('接入代码已复制'); });
 $('.doc-tabs').onclick = event => {
   const b = event.target.closest('[data-code]');
@@ -339,5 +386,10 @@ $('#themeToggle').onclick = () => {
   try { localStorage.setItem('buddyrelay-theme',document.documentElement.classList.contains('dark')?'dark':'light'); } catch {}
 };
 try { document.documentElement.classList.toggle('dark',localStorage.getItem('buddyrelay-theme')==='dark'); } catch {}
-window.addEventListener('popstate',()=>{ const view = routeViews[location.pathname]; if (view && !$('#workspace').hidden) navigate(view,false); else location.reload(); });
+window.addEventListener('popstate', () => {
+  if (location.pathname.replace(siteBase, '') === '/' && !$('#landing').hidden) return;
+  const view = routeViews[location.pathname];
+  if (view && !$('#workspace').hidden) navigate(view, false);
+  else location.reload();
+});
 await boot();
