@@ -6,6 +6,8 @@
 
 管理员可配置多个 OpenAI 兼容来源。在“账号与来源”中逐个发起 WorkBuddy 官方登录，完成授权后自动保存账号、启用国内或国际反代池并同步模型。新同步的模型默认关闭，需要在“模型定价”中设置价格并启用。已有账号库可点击接入相应版本的账号池。
 
+在“账号与来源”点击账号旁的“查看积分”可查询 WorkBuddy 可用积分、各积分包来源、已用额度及到期时间。
+
 ## 计费和缓存
 
 输入和输出价格为整数积分 / 千 Token，按次费用精确到 0.001 积分。数据库以千分之一积分记账。调用前根据输入字节数和最大输出 Token 预扣上限，完成后按上游 usage 结算。上游缺失有效 usage 时收取预扣上限，上游返回超出预估的用量时最高收取预扣金额。当前最大输出为 8192 Token，每用户最多 3 个并发请求。
@@ -20,7 +22,7 @@
 
 `PORTAL_HOST`、`PORTAL_PORT` 决定监听，默认 `127.0.0.1:8787`，`PORTAL_DATA` 指定持久化目录。`PORTAL_SECURE_COOKIE=1` 在 HTTPS 部署中启用 Secure Cookie。公网只提供用户站点，账号管理服务继续在本机回环地址运行。
 
-`PORTAL_UPSTREAM` 默认 `http://127.0.0.1:3425/v1`，初始化 Magpie 来源。`PORTAL_UPSTREAM_KEY` 可在首次启动时设置其密钥。`PORTAL_ACCOUNT_API` 默认 `http://127.0.0.1:57890`，`PORTAL_ACCOUNT_TOKEN` 为本机账号管理服务口令，需与 `WB_SWITCH_TOKEN` 相同。
+`PORTAL_UPSTREAM` 用于初始化 Magpie 来源，`PORTAL_UPSTREAM_KEY` 可在首次启动时设置其密钥。TCP 模式下默认使用 `http://127.0.0.1:3425/v1`，设置 `PORTAL_SOCKET` 时需显式配置该来源。`PORTAL_ACCOUNT_API` 默认 `http://127.0.0.1:57890`，`PORTAL_ACCOUNT_TOKEN` 为本机账号管理服务口令，需与 `WB_SWITCH_TOKEN` 相同。
 
 Hostinger 当前部署使用 Node.js 24 私有进程和 PHP cURL 入口转发，三个服务通过私有 Unix Socket 通信。`PORTAL_SOCKET` 为 Node 入口套接字路径，`PORTAL_SOCKET_DIR` 和 `WB_SWITCH_SOCKET_DIR` 指向存放账号服务及国内、国际反代套接字的私有目录。该部署适配共享主机对回环 TCP 的限制。
 

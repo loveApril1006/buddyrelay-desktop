@@ -297,6 +297,22 @@ main > header h1 { font-size: 23px; letter-spacing: 0; color: #253237; margin-to
 .public-page main > header { max-width: 1200px; margin-left: auto; margin-right: auto; }
 .public-page .balance { display: none; }
 .admin-tabs button.active { background: #e7f5ef; color: #158c70; }
+.pool-account .list-row button { flex-shrink: 0; }
+.pool-credit-status { margin: 12px 0 0; font-size: 13px; }
+.pool-credit-status.error { color: #a1342a; }
+.dark .pool-credit-status.error { color: #ffaea4; }
+.pool-credit-details { padding: 16px 0; }
+.pool-credit-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(115px, 1fr));
+  gap: 12px 16px;
+  margin: 0 0 18px;
+}
+.pool-credit-summary dt { font-size: 13px; }
+.pool-credit-summary dd { margin: 4px 0 0; font-size: 20px; font-weight: 650; }
+.pool-credit-details table { width: 100%; min-width: 460px; }
+.pool-credit-details tbody th { color: inherit; overflow-wrap: anywhere; }
+.dark .pool-credit-details td { color: #c4d6cb; }
 .chat-settings { background: #fbfdfc; }
 input, select, textarea { border-color: #e1e9e6; }
 th { color: #8e9d97; background: #fafcfb; }

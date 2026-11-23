@@ -55,7 +55,10 @@ test('用户隔离、预扣结算、缓存、流式、失败退款和密钥撤�
     await call('/api/admin/credit', { id, points: 100, operation: 'grant-' + id }, admin);
   }
   assert.equal((await call('/api/me', undefined, alice)).data.balance, 100);
-  await call('/api/admin/sync', {}, admin);
+  await call('/api/admin/channel', { name: '停用来源', url: `http://127.0.0.1:${upstream.address().port}/disabled`, enabled: false }, admin);
+  assert.deepEqual((await call('/api/admin/sync', {}, admin)).data, {
+    count: 1, errors: [], sources: [{ name: 'Magpie 统一账号池', count: 1 }]
+  });
   assert.equal((await call('/api/models', undefined, alice)).data.data.length, 0);
   const model = 'magpie/test-model';
   assert.equal((await call('/api/admin/model', { id: model, input_rate: 1, output_rate: 2, request_fee: 1, enabled: true, cache_ttl: 60, cache_percent: 10 }, admin)).res.status, 200);
@@ -88,17 +91,27 @@ test('用户隔离、预扣结算、缓存、流式、失败退款和密钥撤�
   assert.equal((await call('/v1/chat/completions', { ...input, cache: false }, alice)).res.status, 402);
 });
 
-test('只有管理员能管理签到，手动签到不会重复提交', async t => {
+test('管理员可查询账号积分和管理签到，手动签到不会重复提交', async t => {
   const ts = Date.now();
   let config = { enabled: true, lazy_refresh_hours: 7 };
   let runCount = 0;
   let finishRun;
+  const credits = {
+    ok: true, accountId: 'one', totalRemaining: 8.5, totalCapacity: 12, expiredRemaining: 0,
+    resources: [{ packageName: '活动赠送包', remaining: 8.5, used: 3.5, total: 12, expireAt: ts + 86400000 }]
+  };
   const accounts = http.createServer(async (req, res) => {
     if (req.headers.authorization !== 'Bearer test-account-key') {
       res.writeHead(401).end();
       return;
     }
     if (req.url === '/api/accounts') return res.end(JSON.stringify({ accounts: [{ id: 'one' }, { id: 'two' }] }));
+    if (req.url === '/api/credits' && req.method === 'POST') {
+      const chunks = [];
+      for await (const chunk of req) chunks.push(chunk);
+      const { accountId } = JSON.parse(Buffer.concat(chunks));
+      return res.end(JSON.stringify(accountId === 'one' ? credits : { ok: false, error: '账号凭据无效' }));
+    }
     if (req.url === '/api/checkin/config') {
       if (req.method === 'POST') {
         const chunks = [];
@@ -144,6 +157,12 @@ test('只有管理员能管理签到，手动签到不会重复提交', async t 
   const admin = login.headers.get('set-cookie').split(';')[0];
   const signup = await call('/api/register', { email: 'viewer@example.com', password: 'test-user-password' });
   const viewer = signup.headers.get('set-cookie').split(';')[0];
+  const creditsPath = '/api/admin/accounts/credits';
+  assert.equal((await call(creditsPath, { accountId: 'one' })).status, 401);
+  assert.equal((await call(creditsPath, { accountId: 'one' }, viewer)).status, 403);
+  assert.equal((await call(creditsPath, { accountId: 1 }, admin)).status, 400);
+  assert.deepEqual(await (await call(creditsPath, { accountId: 'one' }, admin)).json(), credits);
+  assert.deepEqual(await (await call(creditsPath, { accountId: 'two' }, admin)).json(), { ok: false, error: '账号凭据无效' });
   const path = '/api/admin/checkin';
   assert.equal((await call(path)).status, 401);
   assert.equal((await call(path, undefined, viewer)).status, 403);

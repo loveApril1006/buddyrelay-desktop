@@ -42,7 +42,7 @@ const verifyPassword = async (password, stored) => {
 
 export async function createPortal({
   dataDir = process.env.PORTAL_DATA || join(root, 'data'),
-  upstream = process.env.PORTAL_UPSTREAM || 'http://127.0.0.1:3425/v1',
+  upstream = process.env.PORTAL_UPSTREAM || (process.env.PORTAL_SOCKET ? null : 'http://127.0.0.1:3425/v1'),
   bootstrapPassword = process.env.PORTAL_ADMIN_PASSWORD,
   accountBaseURL = process.env.PORTAL_ACCOUNT_API || 'http://127.0.0.1:57890',
   accountToken = process.env.PORTAL_ACCOUNT_TOKEN || ''
@@ -78,10 +78,13 @@ export async function createPortal({
     run('INSERT INTO users(id,email,password,role) VALUES(?,?,?,?)', randomUUID(), 'admin@buddyrelay.local', await passwordHash(password), 'admin');
     writeFileSync(join(dataDir, 'admin-access.txt'), `管理地址 http://127.0.0.1:8787/admin\n账号 admin@buddyrelay.local\n密码 ${password}\n`, { mode: 0o600 });
   }
-  run('INSERT OR IGNORE INTO channels(id,name,url,key) VALUES(?,?,?,?)', 'magpie', 'Magpie 统一账号池', upstream.replace(/\/$/, ''), process.env.PORTAL_UPSTREAM_KEY || '');
+  if (upstream) {
+    run('INSERT OR IGNORE INTO channels(id,name,url,key) VALUES(?,?,?,?)', 'magpie', 'Magpie 统一账号池', upstream.replace(/\/$/, ''), process.env.PORTAL_UPSTREAM_KEY || '');
+  }
   const authAttempts = new Map();
   const concurrency = new Map();
   const logins = new Map();
+  const creditRequests = new Map();
   let poolSaving = Promise.resolve();
   let checkinRun = null;
   async function accountAPI(path, input, timeoutMs = 30000) {
@@ -98,6 +101,14 @@ export async function createPortal({
     }
     if (!response.ok) fail(502, '账号管理服务暂不可用');
     return response.json();
+  }
+  function accountCredits(accountId) {
+    if (!creditRequests.has(accountId)) {
+      const pending = accountAPI('credits', { accountId }, 110_000)
+        .finally(() => creditRequests.delete(accountId));
+      creditRequests.set(accountId, pending);
+    }
+    return creditRequests.get(accountId);
   }
   async function checkinState() {
     const [config, history, pool] = await Promise.all([
@@ -380,6 +391,11 @@ export async function createPortal({
       }
       if (path === '/api/admin/state') return json(res, 200, { users: query('SELECT id,email,role,balance,disabled FROM users'), channels: query('SELECT id,name,url,enabled FROM channels'), models: query('SELECT * FROM models'), uncertain: query("SELECT id,user_id,model,reserved,created FROM requests WHERE status='uncertain'") });
       if (path === '/api/admin/accounts') return json(res, 200, await accountAPI('accounts'));
+      if (path === '/api/admin/accounts/credits' && req.method === 'POST') {
+        const accountId = input?.accountId;
+        if (typeof accountId !== 'string' || !accountId.trim() || accountId.length > 512) fail(400, '请选择要查询积分的账号');
+        return json(res, 200, await accountCredits(accountId));
+      }
       if (path === '/api/admin/checkin' && req.method === 'GET') return json(res, 200, await checkinState());
       if (path === '/api/admin/checkin' && req.method === 'POST') {
         if (typeof input?.enabled !== 'boolean') fail(400, '请选择开启或关闭自动签到');
@@ -440,10 +456,19 @@ export async function createPortal({
       if (path === '/api/admin/sync' && req.method === 'POST') {
         let count = 0;
         const errors = [];
+        const sources = [];
         for (const channel of query('SELECT * FROM channels WHERE enabled=1')) {
-          try { count += await refreshModels(channel); } catch { errors.push(channel.name + ' 暂不可用'); }
+          try {
+            const discovered = await refreshModels(channel);
+            sources.push({ name: channel.name, count: discovered });
+            count += discovered;
+          } catch {
+            const error = channel.name + ' 暂不可用';
+            sources.push({ name: channel.name, count: null });
+            errors.push(error);
+          }
         }
-        return json(res, 200, { count, errors });
+        return json(res, 200, { count, errors, sources });
       }
       if (path === '/api/admin/accounts/import' && req.method === 'POST') {
         if (!Array.isArray(input.accounts) || !input.accounts.length || input.accounts.length > 200) fail(400, '请提供最多 200 个账号的数组');
