@@ -12,6 +12,8 @@ pub mod edition;
 pub mod export_import;
 #[cfg(target_os = "linux")]
 pub mod linux_keyring;
+#[cfg(target_os = "linux")]
+pub mod local_socket;
 pub mod oauth;
 pub mod official_usage;
 pub mod process;

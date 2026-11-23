@@ -17,6 +17,7 @@ target/
 src-tauri/target/
 /src-tauri/magpie-stage/
 /portal/data/
+/portal/bin/
 
 # npm 包 postinstall 下载的平台二进制
 npm/bin/wb-switch-*

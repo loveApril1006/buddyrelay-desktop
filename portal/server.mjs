@@ -2,7 +2,8 @@ import http from 'node:http';
 import { DatabaseSync } from 'node:sqlite';
 import { randomBytes, randomUUID, createHash, scrypt, timingSafeEqual } from 'node:crypto';
 import { promisify } from 'node:util';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync, chmodSync, existsSync, unlinkSync } from 'node:fs';
+import { Readable } from 'node:stream';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -10,6 +11,19 @@ const root = dirname(fileURLToPath(import.meta.url));
 const derive = promisify(scrypt);
 const hash = text => createHash('sha256').update(text).digest('hex');
 const secret = () => randomBytes(32).toString('base64url');
+async function upstreamFetch(input, options = {}) {
+  const url = new URL(input);
+  const names = { '57890': 'accounts', '7863': 'domestic', '7864': 'international' };
+  const name = names[url.port];
+  if (!process.env.PORTAL_SOCKET_DIR || url.hostname !== '127.0.0.1' || !name) return fetch(input, options);
+  return new Promise((resolve, reject) => {
+    const request = http.request({ socketPath: join(process.env.PORTAL_SOCKET_DIR, name + '.sock'), path: url.pathname + url.search, method: options.method || 'GET', headers: options.headers, signal: options.signal }, response => {
+      resolve(new Response(response.statusCode === 204 ? null : Readable.toWeb(response), { status: response.statusCode, headers: response.headers }));
+    });
+    request.on('error', reject);
+    request.end(options.body);
+  });
+}
 const fail = (status, message) => { throw Object.assign(new Error(message), { status }); };
 const integer = (value, min, max) => {
   if (!Number.isSafeInteger(value) || value < min || value > max) fail(400, '数值超出范围');
@@ -47,7 +61,12 @@ export async function createPortal({ dataDir = process.env.PORTAL_DATA || join(r
     catch (error) { db.exec('ROLLBACK'); throw error; }
   }
   // Interrupted calls retain their reservation for operator reconciliation.
-  run("UPDATE requests SET status='uncertain' WHERE status='pending'");
+  transaction(() => {
+    for (const request of query("SELECT * FROM requests WHERE status='pending'")) {
+      run("UPDATE requests SET status='uncertain',cost=reserved WHERE id=?", request.id);
+      run('INSERT OR IGNORE INTO ledger VALUES(?,?,?,?,?,?)', randomUUID(), request.user_id, -request.reserved, '服务中断，预扣积分待核对', Date.now(), request.id);
+    }
+  });
   if (!one("SELECT id FROM users WHERE role='admin'")) {
     const password = bootstrapPassword || secret();
     run('INSERT INTO users(id,email,password,role) VALUES(?,?,?,?)', randomUUID(), 'admin@buddyrelay.local', await passwordHash(password), 'admin');
@@ -59,7 +78,7 @@ export async function createPortal({ dataDir = process.env.PORTAL_DATA || join(r
   const logins = new Map();
   let poolSaving = Promise.resolve();
   async function accountAPI(path, input) {
-    const response = await fetch((process.env.PORTAL_ACCOUNT_API || 'http://127.0.0.1:57890') + '/api/' + path, { method: input === undefined ? 'GET' : 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + (process.env.PORTAL_ACCOUNT_TOKEN || '') }, body: input === undefined ? undefined : JSON.stringify(input), signal: AbortSignal.timeout(30000) });
+    const response = await upstreamFetch((process.env.PORTAL_ACCOUNT_API || 'http://127.0.0.1:57890') + '/api/' + path, { method: input === undefined ? 'GET' : 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + (process.env.PORTAL_ACCOUNT_TOKEN || '') }, body: input === undefined ? undefined : JSON.stringify(input), signal: AbortSignal.timeout(30000) });
     if (!response.ok) fail(502, '账号管理服务暂不可用');
     return response.json();
   }
@@ -112,7 +131,7 @@ export async function createPortal({ dataDir = process.env.PORTAL_DATA || join(r
     return Math.min(hold, Math.ceil(usage.prompt_tokens * model.input_rate + usage.completion_tokens * model.output_rate + model.request_fee));
   }
   async function refreshModels(channel) {
-    const response = await fetch(channel.url + '/models', { headers: { Authorization: 'Bearer ' + (channel.key || 'magpie') }, signal: AbortSignal.timeout(15000) });
+    const response = await upstreamFetch(channel.url + '/models', { headers: { Authorization: 'Bearer ' + (channel.key || 'magpie') }, signal: AbortSignal.timeout(15000) });
     if (!response.ok) fail(502, '上游模型列表读取失败');
     const result = await response.json();
     if (!Array.isArray(result.data)) fail(502, '上游模型列表格式错误');
@@ -178,7 +197,7 @@ export async function createPortal({ dataDir = process.env.PORTAL_DATA || join(r
     let delivered = false;
     let usage;
     try {
-      const response = await fetch(model.url + '/chat/completions', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + (model.key || 'magpie') }, body: serialized, signal: controller.signal });
+      const response = await upstreamFetch(model.url + '/chat/completions', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + (model.key || 'magpie') }, body: serialized, signal: controller.signal });
       if (!response.ok) { await response.body?.cancel(); fail(502, '上游调用失败，预扣积分已退回'); }
       let output = '';
       if (wantsStream) {
@@ -367,9 +386,7 @@ export async function createPortal({ dataDir = process.env.PORTAL_DATA || join(r
       }
       if (path === '/api/admin/accounts/import' && req.method === 'POST') {
         if (!Array.isArray(input.accounts) || !input.accounts.length || input.accounts.length > 200) fail(400, '请提供最多 200 个账号的数组');
-        const response = await fetch((process.env.PORTAL_ACCOUNT_API || 'http://127.0.0.1:57890') + '/api/import', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + (process.env.PORTAL_ACCOUNT_TOKEN || '') }, body: JSON.stringify({ fileText: JSON.stringify(input.accounts), indexes: input.accounts.map((_, i) => i) }), signal: AbortSignal.timeout(15000) });
-        if (!response.ok) fail(502, '账号管理服务拒绝导入，请检查后台连接');
-        const result = await response.json();
+        const result = await accountAPI('import', { fileText: JSON.stringify(input.accounts), indexes: input.accounts.map((_, i) => i) });
         return json(res, 200, { imported: result.imported, skipped: result.skipped });
       }
       if (path === '/api/admin/reconcile' && req.method === 'POST') {
@@ -393,14 +410,15 @@ export async function createPortal({ dataDir = process.env.PORTAL_DATA || join(r
   const cleanup = setInterval(() => { run('DELETE FROM sessions WHERE expires<?', Date.now()); run('DELETE FROM cache WHERE expires<?', Date.now()); authAttempts.clear(); }, 600000);
   cleanup.unref();
   let syncing = false;
+  let closing = false;
   const sync = setInterval(async () => {
     if (syncing) return;
     syncing = true;
-    try { for (const channel of query('SELECT * FROM channels WHERE enabled=1')) { try { await refreshModels(channel); } catch {} } }
+    try { for (const channel of query('SELECT * FROM channels WHERE enabled=1')) { if (closing) break; try { await refreshModels(channel); } catch {} } }
     finally { syncing = false; }
   }, 60000);
   sync.unref();
-  server.on('close', () => { clearInterval(cleanup); clearInterval(sync); db.close(); });
+  server.on('close', () => { closing = true; clearInterval(cleanup); clearInterval(sync); db.close(); });
   return { server, db, refreshModels };
 }
 
@@ -408,5 +426,11 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   const { server } = await createPortal();
   const host = process.env.PORTAL_HOST || '127.0.0.1';
   const port = Number(process.env.PORTAL_PORT || 8787);
-  server.listen(port, host, () => console.log(`BuddyRelay portal http://${host}:${port}\nAdmin credentials are stored in portal/data/admin-access.txt`));
+  const socket = process.env.PORTAL_SOCKET;
+  if (socket && existsSync(socket)) unlinkSync(socket);
+  server.listen(socket ? { path: socket } : { port, host }, () => {
+    if (socket) chmodSync(socket, 0o600);
+    console.log(`BuddyRelay portal started. Admin credentials are in the private data directory.`);
+  });
+  process.on('SIGTERM', () => { server.close(() => process.exit(0)); setTimeout(() => process.exit(1), 20000).unref(); });
 }

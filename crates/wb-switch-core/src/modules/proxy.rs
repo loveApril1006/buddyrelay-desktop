@@ -3557,6 +3557,19 @@ async fn run_endpoint_until(
         edition,
         endpoint: Arc::new(endpoint),
     };
+    #[cfg(target_os = "linux")]
+    if let Some(path) = crate::modules::local_socket::path(edition.key()) {
+        let listener = match crate::modules::local_socket::bind(&path).await {
+            Ok(listener) => listener,
+            Err(error) => {
+                let message = format!("Socket bind failed: {error}");
+                let _ = ready.send(Err(message.clone()));
+                return Err(message);
+            }
+        };
+        let _ = ready.send(Ok(()));
+        return crate::modules::local_socket::serve(listener, router(st), async { let _ = shutdown.await; }).await.map_err(|error| error.to_string());
+    }
     let listener = match tokio::net::TcpListener::bind(addr).await {
         Ok(l) => l,
         Err(e) => {

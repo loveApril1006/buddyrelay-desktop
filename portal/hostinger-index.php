@@ -9,6 +9,7 @@ foreach (['Content-Type', 'Authorization', 'Cookie', 'Origin', 'Idempotency-Key'
     if (isset($_SERVER[$key])) $headers[] = $name . ': ' . $_SERVER[$key];
 }
 curl_setopt_array($ch, [
+    CURLOPT_UNIX_SOCKET_PATH => '/home/u500831383/buddyrelay-portal/data/portal.sock',
     CURLOPT_CUSTOMREQUEST => $_SERVER['REQUEST_METHOD'],
     CURLOPT_HTTPHEADER => $headers,
     CURLOPT_CONNECTTIMEOUT => 5,

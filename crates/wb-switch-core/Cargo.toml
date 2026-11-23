@@ -39,3 +39,4 @@ windows = { version = "0.58", features = ["Win32_Foundation", "Win32_Security_Cr
 # 依赖图 / Cargo.lock 里，只多一条依赖边，不新增下载。
 [target.'cfg(target_os = "linux")'.dependencies]
 zbus = "5"
+hyper-util = { version = "0.1", features = ["server-auto", "service", "tokio"] }

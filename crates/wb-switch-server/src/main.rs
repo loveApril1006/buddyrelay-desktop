@@ -198,6 +198,15 @@ async fn serve(args: &[String]) {
     api::set_access_token(token.clone());
 
     let app = api::router();
+    #[cfg(target_os = "linux")]
+    if let Some(path) = modules_socket_path() {
+        let listener = wb_switch_core::modules::local_socket::bind(&path).await.expect("Cannot bind account socket");
+        spawn_background_loops();
+        proxy::spawn_from_config();
+        println!("Account service on private Unix socket");
+        wb_switch_core::modules::local_socket::serve(listener, app, std::future::pending()).await.expect("Account socket stopped");
+        return;
+    }
     let addr = format!("{host}:{port}");
     let listener = match tokio::net::TcpListener::bind(&addr).await {
         Ok(l) => l,
@@ -229,6 +238,11 @@ async fn serve(args: &[String]) {
     proxy::spawn_from_config();
 
     axum::serve(listener, app).await.unwrap();
+}
+
+#[cfg(target_os = "linux")]
+fn modules_socket_path() -> Option<std::path::PathBuf> {
+    wb_switch_core::modules::local_socket::path("accounts")
 }
 
 fn open_browser(addr: &str) {
