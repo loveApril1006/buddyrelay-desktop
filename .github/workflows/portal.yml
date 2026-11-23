@@ -1,0 +1,29 @@
+name: Build relay portal
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - run: npm ci
+      - run: npm run build
+      - run: cargo build --release --locked -p wb-switch-server
+      - name: Package portal
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory release/portal/bin -Force
+          Copy-Item portal/* release/portal -Recurse -Exclude data,bin
+          Copy-Item target/release/wb-switch-server.exe release/portal/bin/
+          Copy-Item LICENSE,THIRD-PARTY-NOTICES.md release/portal/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: buddyrelay-portal-windows
+          path: release/portal/
