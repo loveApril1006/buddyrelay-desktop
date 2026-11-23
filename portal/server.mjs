@@ -82,6 +82,10 @@ export async function createPortal({ dataDir = process.env.PORTAL_DATA || join(r
     run('UPDATE users SET balance=balance+? WHERE id=?', delta, userId);
     run('INSERT INTO ledger VALUES(?,?,?,?,?,?)', randomUUID(), userId, delta, reason, Date.now(), operation);
   }
+  function costOf(usage, model, hold) {
+    if (!Number.isSafeInteger(usage?.prompt_tokens) || usage.prompt_tokens < 0 || !Number.isSafeInteger(usage?.completion_tokens) || usage.completion_tokens < 0) return hold;
+    return Math.min(hold, Math.ceil(usage.prompt_tokens * model.input_rate + usage.completion_tokens * model.output_rate + model.request_fee));
+  }
   async function refreshModels(channel) {
     const response = await fetch(channel.url + '/models', { headers: { Authorization: 'Bearer ' + (channel.key || 'magpie') }, signal: AbortSignal.timeout(15000) });
     if (!response.ok) fail(502, '上游模型列表读取失败');
@@ -101,6 +105,7 @@ export async function createPortal({ dataDir = process.env.PORTAL_DATA || join(r
     if (!model) fail(400, '模型未开放，请联系管理员设置价格并启用');
     if (!Array.isArray(input.messages) || !input.messages.length || input.messages.length > 100) fail(400, 'messages 格式错误');
     if ((input.n ?? 1) !== 1) fail(400, '每次请求仅支持一条回答');
+    if (input.temperature !== undefined && (!Number.isFinite(input.temperature) || input.temperature < 0 || input.temperature > 2)) fail(400, '随机程度必须在 0–2 之间');
     const maxTokens = integer(input.max_completion_tokens ?? input.max_tokens ?? 1024, 1, 8192);
     const payload = { ...input, model: model.upstream_model, max_tokens: maxTokens, n: 1 };
     delete payload.max_completion_tokens;
@@ -156,24 +161,30 @@ export async function createPortal({ dataDir = process.env.PORTAL_DATA || join(r
         res.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no' });
         const decoder = new TextDecoder();
         let pending = '';
+        let size = 0;
         let done = false;
         for await (const chunk of response.body) {
           delivered = true;
-          output += decoder.decode(chunk, { stream: true });
-          if (output.length > 16 * 1024 * 1024) fail(502, '上游响应过大');
-          pending += decoder.decode();
-          // Parse completed SSE events from the collected bytes.
-          const lines = output.split('\n');
+          size += chunk.length;
+          if (size > 16 * 1024 * 1024) fail(502, '上游响应过大');
+          pending += decoder.decode(chunk, { stream: true });
+          const lines = pending.split('\n');
+          pending = lines.pop();
           for (const line of lines.slice(0, -1)) {
             if (!line.startsWith('data:')) continue;
             const data = line.slice(5).trim();
             if (data === '[DONE]') done = true;
             else { try { const event = JSON.parse(data); if (event.usage) usage = event.usage; } catch {} }
           }
-          res.write(chunk);
+          if (!res.write(chunk)) await new Promise((resolve, reject) => {
+            const drained = () => { res.off('close', closed); resolve(); };
+            const closed = () => { res.off('drain', drained); reject(new Error('Client disconnected')); };
+            res.once('drain', drained);
+            res.once('close', closed);
+          });
         }
         if (!done) fail(502, '上游流式连接中断');
-        const cost = usage ? Math.min(hold, Math.ceil(usage.prompt_tokens * model.input_rate + usage.completion_tokens * model.output_rate + model.request_fee)) : hold;
+        const cost = costOf(usage, model, hold);
         finish(cost, usage, null, 'done');
         res.end();
       } else {
@@ -184,7 +195,7 @@ export async function createPortal({ dataDir = process.env.PORTAL_DATA || join(r
         if (!Array.isArray(result.choices) || result.error) fail(502, '上游回答格式错误');
         result.model = model.id;
         usage = result.usage;
-        const cost = usage ? Math.min(hold, Math.ceil(usage.prompt_tokens * model.input_rate + usage.completion_tokens * model.output_rate + model.request_fee)) : hold;
+        const cost = costOf(usage, model, hold);
         output = JSON.stringify(result);
         finish(cost, usage, output, 'done');
         if (cacheable) run('INSERT OR REPLACE INTO cache VALUES(?,?,?,?)', user.id, cacheKey, output, Date.now() + model.cache_ttl * 1000);
@@ -211,6 +222,7 @@ export async function createPortal({ dataDir = process.env.PORTAL_DATA || join(r
         res.end(readFileSync(join(root, 'public', file))); return;
       }
       if (path === '/healthz') return json(res, 200, { ok: true });
+      if (req.headers['content-length'] && Number(req.headers['content-length']) > 1024 * 1024) fail(413, '请求最大为 1 MB');
       if (req.method !== 'GET' && req.headers.origin && req.headers.origin !== 'http://' + req.headers.host && req.headers.origin !== 'https://' + req.headers.host) fail(403, '跨站请求被拒绝');
       if (req.method === 'POST' && ['/api/login','/api/register'].includes(path)) {
         const ip = req.socket.remoteAddress;
@@ -228,6 +240,8 @@ export async function createPortal({ dataDir = process.env.PORTAL_DATA || join(r
           try { run('INSERT INTO users(id,email,password,role) VALUES(?,?,?,?)', randomUUID(), email, digest, 'user'); } catch { fail(409, '该邮箱已注册'); }
           user = one('SELECT * FROM users WHERE email=?', email);
         } else if (!user || !await verifyPassword(input.password, user.password) || user.disabled) fail(401, '邮箱或密码错误');
+        user = one('SELECT * FROM users WHERE id=?', user.id);
+        if (user.disabled) fail(401, '账户已停用');
         const token = secret();
         run('INSERT INTO sessions VALUES(?,?,?)', hash(token), user.id, Date.now() + 86400000);
         const secure = process.env.PORTAL_SECURE_COOKIE === '1' ? '; Secure' : '';
@@ -335,7 +349,15 @@ export async function createPortal({ dataDir = process.env.PORTAL_DATA || join(r
   });
   const cleanup = setInterval(() => { run('DELETE FROM sessions WHERE expires<?', Date.now()); run('DELETE FROM cache WHERE expires<?', Date.now()); authAttempts.clear(); }, 600000);
   cleanup.unref();
-  server.on('close', () => { clearInterval(cleanup); db.close(); });
+  let syncing = false;
+  const sync = setInterval(async () => {
+    if (syncing) return;
+    syncing = true;
+    try { for (const channel of query('SELECT * FROM channels WHERE enabled=1')) { try { await refreshModels(channel); } catch {} } }
+    finally { syncing = false; }
+  }, 60000);
+  sync.unref();
+  server.on('close', () => { clearInterval(cleanup); clearInterval(sync); db.close(); });
   return { server, db, refreshModels };
 }
 
