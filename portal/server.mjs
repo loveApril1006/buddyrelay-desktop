@@ -56,6 +56,31 @@ export async function createPortal({ dataDir = process.env.PORTAL_DATA || join(r
   run('INSERT OR IGNORE INTO channels(id,name,url,key) VALUES(?,?,?,?)', 'magpie', 'Magpie 统一账号池', upstream.replace(/\/$/, ''), process.env.PORTAL_UPSTREAM_KEY || '');
   const authAttempts = new Map();
   const concurrency = new Map();
+  const logins = new Map();
+  let poolSaving = Promise.resolve();
+  async function accountAPI(path, input) {
+    const response = await fetch((process.env.PORTAL_ACCOUNT_API || 'http://127.0.0.1:57890') + '/api/' + path, { method: input === undefined ? 'GET' : 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + (process.env.PORTAL_ACCOUNT_TOKEN || '') }, body: input === undefined ? undefined : JSON.stringify(input), signal: AbortSignal.timeout(30000) });
+    if (!response.ok) fail(502, '账号管理服务暂不可用');
+    return response.json();
+  }
+  async function connectPool(edition) {
+    const task = async () => {
+      const config = await accountAPI('proxy/config');
+      const endpoint = config[edition];
+      if (!endpoint) fail(502, '账号管理服务版本不兼容');
+      endpoint.enabled = true;
+      endpoint.accounts = [];
+      const port = edition === 'domestic' ? 7863 : 7864;
+      endpoint.listen = '127.0.0.1:' + port;
+      if (!endpoint.api_key) endpoint.api_key = secret();
+      await accountAPI('proxy/config', { config });
+      run('INSERT INTO channels VALUES(?,?,?,?,1) ON CONFLICT(id) DO UPDATE SET key=excluded.key,url=excluded.url,enabled=1', 'workbuddy-' + edition, edition === 'domestic' ? 'WorkBuddy 国内账号池' : 'WorkBuddy AI 国际账号池', 'http://127.0.0.1:' + port + '/v1', endpoint.api_key);
+      await refreshModels(one('SELECT * FROM channels WHERE id=?', 'workbuddy-' + edition));
+    };
+    const pending = poolSaving.then(task);
+    poolSaving = pending.catch(() => {});
+    return pending;
+  }
 
   async function body(req) {
     let size = 0;
@@ -282,6 +307,24 @@ export async function createPortal({ dataDir = process.env.PORTAL_DATA || join(r
         return;
       }
       if (path === '/api/admin/state') return json(res, 200, { users: query('SELECT id,email,role,balance,disabled FROM users'), channels: query('SELECT id,name,url,enabled FROM channels'), models: query('SELECT * FROM models'), uncertain: query("SELECT id,user_id,model,reserved,created FROM requests WHERE status='uncertain'") });
+      if (path === '/api/admin/accounts') return json(res, 200, await accountAPI('accounts'));
+      if (path === '/api/admin/oauth/start' && req.method === 'POST') {
+        const edition = input.edition === 'international' ? 'international' : 'domestic';
+        const result = await accountAPI('oauth/start', { edition });
+        logins.set(result.loginId, { userId: user.id, edition, expires: Date.now() + 600000 });
+        return json(res, 200, result);
+      }
+      if (path === '/api/admin/oauth/status' && req.method === 'POST') {
+        const login = logins.get(input.loginId);
+        if (!login || login.userId !== user.id || login.expires < Date.now()) fail(400, '登录请求已过期，请重新添加');
+        const result = await accountAPI('oauth/status', { loginId: input.loginId });
+        if (result.done && !result.error && !login.connected) { await connectPool(login.edition); login.connected = true; }
+        return json(res, 200, { done: !!result.done, error: result.error ? '授权未完成，请重新登录' : null, connected: !!login.connected });
+      }
+      if (path === '/api/admin/accounts/connect' && req.method === 'POST') {
+        await connectPool(input.edition === 'international' ? 'international' : 'domestic');
+        return json(res, 200, { ok: true });
+      }
       if (path === '/api/admin/credit' && req.method === 'POST') {
         const delta = integer(Math.round(Number(input.points) * 1000), -1e12, 1e12);
         if (!one('SELECT id FROM users WHERE id=?', input.id || '')) fail(404, '用户不存在');

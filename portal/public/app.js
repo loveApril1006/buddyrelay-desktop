@@ -1,4 +1,7 @@
 const $ = selector => document.querySelector(selector);
+const siteBase = location.pathname.startsWith('/relay/') ? '/relay' : '';
+const nativeFetch = window.fetch.bind(window);
+const fetch = (path, options) => nativeFetch(typeof path === 'string' && path.startsWith('/') ? siteBase + path : path, options);
 const escape = value => String(value ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
 const points = milli => (milli / 1000).toLocaleString('zh-CN', { maximumFractionDigits: 3 });
 const date = ms => new Date(ms).toLocaleString('zh-CN', { hour12: false });
@@ -36,9 +39,9 @@ async function boot() {
     $('#workspace').hidden = false;
     $('#userEmail').textContent = me.email;
     $('#adminNav').hidden = me.role !== 'admin';
-    $('#baseURL').value = location.origin + '/v1';
+    $('#baseURL').value = location.origin + siteBase + '/v1';
     await loadModels();
-    await navigate(location.pathname === '/admin' && me.role === 'admin' ? 'admin' : 'chat');
+    await navigate(location.pathname.endsWith('/admin') && me.role === 'admin' ? 'admin' : 'chat');
   } catch {
     $('#auth').hidden = false;
     $('#workspace').hidden = true;
